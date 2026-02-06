@@ -1,0 +1,6 @@
+# Python deps for training the risk model from CSV (see train_risk_model.py)
+# Install: pip install -r scripts/requirements-ml.txt
+#         (or: pip3 install ... / python3 -m pip install ...)
+pandas>=1.5.0
+scikit-learn>=1.2.0
+joblib>=1.2.0

@@ -1,0 +1,90 @@
+# Payment Integration Framework - main configuration
+spring:
+  application:
+    name: payment-integration-framework
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: payment-framework
+      auto-offset-reset: earliest
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# Framework topic for payment lifecycle events (audit, compliance, ML)
+payment:
+  kafka:
+    topic:
+      payment-events: payment-events
+  adapters:
+    mock:
+      enabled: true
+  # Project 2: risk / ML pipeline
+  risk:
+    kafka:
+      consumer-group: payment-risk-engine-v3
+      topic:
+        risk-alerts: risk-alerts
+    engine:
+      enabled: true
+      threshold:
+        high-failure-rate: 0.5
+        velocity-1min: 10
+        alert-score: 0.5
+    # ML integration (optional)
+    ml:
+      enabled: true  # Set to true to enable ML scoring
+      service:
+        url: http://localhost:5001/predict  # Match your ML service port
+        timeout: 2000  # milliseconds
+
+# Resilience4j: per-provider circuit breaker, shared retry
+resilience4j:
+  circuitbreaker:
+    instances:
+      MOCK:
+        register-health-indicator: true
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      CARD:
+        register-health-indicator: true
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+      WALLET:
+        register-health-indicator: true
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+  retry:
+    instances:
+      payment:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+
+# Actuator: health (Kafka, Redis, circuit breakers) and metrics
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+  health:
+    redis:
+      enabled: true
+  kafka:
+    consumer:
+      enabled: true
+
+# OpenAPI / Swagger UI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    enabled: true
