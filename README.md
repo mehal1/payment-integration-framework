@@ -123,67 +123,56 @@ Open Swagger UI: http://localhost:8080/swagger-ui/index.html
 ### System Architecture Diagram
 
 ```mermaid
-graph TB
-    subgraph "External Clients"
+graph LR
+    subgraph CL["Client Layer"]
         Client[Client Applications]
-        Swagger[Swagger UI]
     end
 
-    subgraph "Payment Integration Framework"
-        API[PaymentController<br/>REST API]
-        Orchestrator[PaymentOrchestrator<br/>Gateway Routing<br/>Circuit Breaker<br/>Retry Logic]
-        Idempotency[IdempotencyService]
-        Gateway[MockPaymentGateway<br/>PaymentGateway Interface]
-        Producer[PaymentEventProducer]
+    subgraph PS["Payment Service"]
+        API[REST API]
+        Orchestrator[Payment Orchestrator]
+        Gateway[Payment Gateways]
     end
 
-    subgraph "Risk & Fraud Detection"
-        Consumer[PaymentEventConsumer<br/>Kafka Listener]
-        Aggregator[TransactionWindowAggregator<br/>Feature Aggregation]
-        RiskEngine[RiskEngine<br/>Rule-Based Scoring]
-        MLScorer[MlRiskScorer<br/>ML Integration]
-        AlertStore[RecentAlertsStore<br/>In-Memory Cache]
-        AlertAPI[RiskAlertController<br/>REST API]
-        AlertProducer[RiskAlertProducer]
+    subgraph RS["Risk Service"]
+        Consumer[Event Consumer]
+        Aggregator[Transaction Window<br/>Aggregator]
+        RiskEngine[Risk Engine]
+        MLScorer[ML Scorer]
     end
 
-    subgraph "Infrastructure"
-        Kafka[(Apache Kafka<br/>payment-events<br/>risk-alerts)]
-        Redis[(Redis<br/>Idempotency Cache)]
+    subgraph DL["Infrastructure"]
+        Kafka[Kafka<br/>Event Stream]
+        Redis[Redis<br/>Cache]
     end
 
-    subgraph "External Services"
-        MLService[ML Service<br/>Flask/FastAPI<br/>Port 5001]
-        PaymentProviders[Payment Providers<br/>Stripe, Adyen, etc.]
+    subgraph ES["External Services"]
+        MLService[ML Service]
+        PaymentProviders[Payment Providers]
     end
 
-    Client -->|HTTP POST /api/v1/payments/execute| API
-    Swagger -->|API Documentation| API
+    Client -->|Payment Request| API
     API --> Orchestrator
-    Orchestrator -->|Check Cache| Idempotency
-    Idempotency <-->|Read/Write| Redis
-    Orchestrator -->|Execute Payment| Gateway
-    Gateway -->|Payment Processing| PaymentProviders
-    Orchestrator -->|Publish Event| Producer
-    Producer -->|Payment Events| Kafka
+    Orchestrator -->|Idempotency| Redis
+    Orchestrator --> Gateway
+    Gateway --> PaymentProviders
+    Orchestrator -->|Publish Events| Kafka
     
-    Kafka -->|Consume Events| Consumer
+    Kafka -->|Consume| Consumer
     Consumer --> Aggregator
     Aggregator --> RiskEngine
     RiskEngine -->|ML Scoring| MLScorer
-    MLScorer -->|HTTP Request| MLService
-    RiskEngine --> AlertStore
-    AlertStore --> AlertAPI
-    Client -->|GET /api/v1/risk/alerts| AlertAPI
-    RiskEngine -->|Publish Alerts| AlertProducer
-    AlertProducer -->|Risk Alerts| Kafka
+    MLScorer -->|HTTP| MLService
+    RiskEngine -->|Publish Alerts| Kafka
+    Kafka -->|Alerts| API
+    API -->|Receive Alerts| Client
 
-    style API fill:#e1f5ff
-    style Orchestrator fill:#e1f5ff
-    style RiskEngine fill:#fff4e1
-    style Kafka fill:#f0f0f0
-    style Redis fill:#f0f0f0
-    style MLService fill:#e8f5e9
+    style API fill:#4A90E2
+    style Orchestrator fill:#4A90E2
+    style RiskEngine fill:#F5A623
+    style Kafka fill:#FF6B6B
+    style Redis fill:#4ECDC4
+    style MLService fill:#50E3C2
 ```
 
 ### Key Components
