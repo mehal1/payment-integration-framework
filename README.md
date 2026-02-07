@@ -7,9 +7,12 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 ## Features
 
 ### Project 1: Payment Integration Framework
-- **Pluggable Payment Gateways**: Support for card, wallet, BNPL, crypto, and bank transfer providers
+- **Pluggable Payment Gateway Adapters**: Support for card, wallet, BNPL, crypto, and bank transfer payment gateways (Stripe, Adyen, PayPal, etc.)
+- **Intelligent Gateway Routing**: Multiple routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, Response Time-Based, Hybrid)
+- **Automatic Failover**: Automatically fails over to alternative payment gateways when primary gateway fails
+- **Gateway Performance Metrics**: Tracks success rate, latency, cost, and active connections per payment gateway
 - **Idempotency**: Redis-backed idempotency to prevent duplicate charges
-- **Resilience**: Circuit breakers and retry logic (Resilience4j) per payment provider
+- **Resilience**: Circuit breakers and retry logic (Resilience4j) per payment gateway
 - **Event-Driven Architecture**: Kafka events for audit, compliance, and downstream ML/analytics
 - **REST API**: JSON API with OpenAPI documentation
 - **Health Monitoring**: Actuator endpoints for Kafka, Redis, and circuit breaker health
@@ -120,6 +123,37 @@ Open Swagger UI: http://localhost:8080/swagger-ui/index.html
 
 ## Architecture
 
+### Checkout Flow: Customer to Framework Response
+
+Simple end-to-end flow from customer checkout to response:
+
+**Simplified Flow:**
+
+1. **Customer sends request** → POST to `/api/v1/payments/execute` with payment details
+2. **Framework receives** → PaymentController processes request
+3. **Check idempotency** → Redis lookup for duplicate request
+   - **If duplicate**: Return cached result instantly (<10ms)
+   - **If new**: Continue to payment execution
+4. **Select provider** → Router picks best provider (WeightedRoundRobin, CostBased, etc.)
+5. **Execute payment** → Call provider with circuit breaker and retry
+   - **If provider fails**: Automatically retry with next provider (up to 3 attempts)
+6. **Store result** → Save in Redis for future idempotency checks (24-hour TTL)
+7. **Publish event** → Send to Kafka for audit and risk analysis (async, non-blocking)
+8. **Return response** → Send standardized result to customer UI
+9. **Risk processing** → Risk engine analyzes event in background (doesn't block response)
+
+**Response Time**: Typically 200-500ms (provider-dependent). Idempotency cache hits return in <10ms.
+
+**Error Scenarios:**
+
+- **Duplicate Request**: If same `idempotencyKey` is sent twice, second request returns cached result from Redis (<10ms)
+- **Provider Failure**: Framework automatically fails over to next best provider (up to 3 attempts)
+- **All Providers Down**: Returns `ALL_PROVIDERS_FAILED` error after exhausting all providers
+- **Circuit Breaker Open**: Provider skipped, failover to next provider
+- **Kafka Unavailable**: Payment still processes, but events may be lost (non-blocking)
+
+**Idempotency Guarantee**: Same `idempotencyKey` always returns same result, even across provider failovers.
+
 ### System Architecture Diagram
 
 ```mermaid
@@ -131,7 +165,7 @@ graph LR
     subgraph PS["Payment Service"]
         API[REST API]
         Orchestrator[Payment Orchestrator]
-        Gateway[Payment Gateways]
+        Adapters[Payment Gateway Adapters<br/>StripePaymentGatewayAdapter,<br/>AdyenPaymentGatewayAdapter]
     end
 
     subgraph RS["Risk Service"]
@@ -148,14 +182,14 @@ graph LR
 
     subgraph ES["External Services"]
         MLService[ML Service]
-        PaymentProviders[Payment Providers]
+        PaymentGateways[Payment Gateways<br/>Stripe, Adyen, PayPal]
     end
 
     Client -->|Payment Request| API
     API --> Orchestrator
     Orchestrator -->|Idempotency| Redis
-    Orchestrator --> Gateway
-    Gateway --> PaymentProviders
+    Orchestrator --> Adapters
+    Adapters -->|API Calls| PaymentGateways
     Orchestrator -->|Publish Events| Kafka
     
     Kafka -->|Consume| Consumer
@@ -177,11 +211,18 @@ graph LR
 
 ### Key Components
 
-- **PaymentOrchestrator**: Routes requests to appropriate gateway, applies idempotency, circuit breakers, and retries
+- **PaymentOrchestrator**: Routes requests to appropriate payment gateway adapter with intelligent routing and automatic failover, applies idempotency, circuit breakers, and retries
+- **ProviderRouter**: Selects best payment gateway (Stripe, Adyen, etc.) using configurable routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, etc.)
+- **ProviderPerformanceMetrics**: Tracks payment gateway performance (success rate, latency, cost, connections) for intelligent routing
+- **Payment Gateway Adapters** (e.g., `StripePaymentGatewayAdapter`, `AdyenPaymentGatewayAdapter`): Code adapters that wrap external payment gateway APIs (Stripe, Adyen, PayPal) and convert between framework format and gateway-specific formats
 - **IdempotencyService**: Redis-backed cache to prevent duplicate processing
 - **PaymentEventProducer**: Publishes payment lifecycle events to Kafka
 - **RiskEngine**: Evaluates payment events using rules and optional ML scoring
 - **TransactionWindowAggregator**: Aggregates transaction features for risk scoring
+
+**Note on Terminology:**
+- **Payment Gateway Adapters** = Your code classes (`StripePaymentGatewayAdapter`, `AdyenPaymentGatewayAdapter`) that wrap external payment gateways
+- **Payment Gateways** = External services (Stripe, Adyen, PayPal) - industry-standard term for payment processing services
 
 ## Configuration
 
@@ -195,10 +236,14 @@ Key configuration properties in `application.yaml`:
 | `payment.risk.engine.enabled` | `true` | Enable risk engine |
 | `payment.risk.ml.enabled` | `true` | Enable ML scoring |
 | `payment.risk.ml.service.url` | `http://localhost:5001/predict` | ML service endpoint |
+| `payment.routing.strategy` | `WeightedRoundRobin` | Routing strategy (WeightedRoundRobin, LeastConnections, CostBased, ResponseTimeBased, Hybrid) |
+| `payment.routing.failover.enabled` | `true` | Enable automatic failover to alternative payment gateways |
+| `payment.routing.failover.max-attempts` | `3` | Maximum number of payment gateways to try before giving up |
 
 See `src/main/resources/application.yaml` for complete configuration.
 
 ## Testing
+
 
 ### Project 1: Payment Integration Framework Tests
 
@@ -216,7 +261,7 @@ See `src/main/resources/application.yaml` for complete configuration.
 
 **Coverage:**
 - `PaymentController` - REST API endpoints, validation, response format
-- `PaymentOrchestrator` - Gateway routing, idempotency, circuit breakers
+- `PaymentOrchestrator` - Payment gateway adapter routing, idempotency, circuit breakers
 - `IdempotencyService` - Redis operations (mocked)
 
 ### Project 2: Risk & Fraud Detection Tests
@@ -261,7 +306,7 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10
 
 **Test 2: High Failure Rate Alert** (Multiple failures)
 ```bash
-# Trigger multiple failing payments (amount >= 999999 triggers failure in MockPaymentGateway)
+# Trigger multiple failing payments (amount >= 999999 triggers failure in MockPaymentGatewayAdapter)
 for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
@@ -318,13 +363,15 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0].summary'
 - Redis idempotency with real Redis instance (Testcontainers)
 - Kafka event flow with Embedded Kafka
 
-## Adding a New Payment Provider
+## Adding a New Payment Gateway
 
-1. **Implement `PaymentGateway` interface:**
+To add support for a new payment gateway (e.g., Square, Braintree):
+
+1. **Implement `PaymentGatewayAdapter` interface** (creates a payment gateway adapter):
 
 ```java
 @Component
-public class StripePaymentGateway implements PaymentGateway {
+public class StripePaymentGatewayAdapter implements PaymentGatewayAdapter {
     @Override
     public PaymentProviderType getProviderType() {
         return PaymentProviderType.CARD;
@@ -332,7 +379,7 @@ public class StripePaymentGateway implements PaymentGateway {
     
     @Override
     public PaymentResult execute(PaymentRequest request) {
-        // Call Stripe API
+        // Call Stripe API (external payment service)
         // Map response to PaymentResult
         return PaymentResult.builder()
             .idempotencyKey(request.getIdempotencyKey())
@@ -346,6 +393,50 @@ public class StripePaymentGateway implements PaymentGateway {
 2. **Register the bean** - `PaymentOrchestrator` auto-discovers by `getProviderType()`
 
 3. **Configure circuit breaker** (optional) - add entry in `application.yaml` under `resilience4j.circuitbreaker.instances`
+
+## Provider Routing and Failover
+
+The framework supports intelligent provider routing and automatic failover:
+
+### Routing Strategies
+
+Configure routing strategy in `application.yaml`:
+
+```yaml
+payment:
+  routing:
+    strategy: WeightedRoundRobin  # Options: WeightedRoundRobin, LeastConnections, CostBased, ResponseTimeBased, Hybrid
+    failover:
+      enabled: true
+      max-attempts: 3
+```
+
+**Available Strategies:**
+- **WeightedRoundRobin**: Routes based on provider success rate (higher success = more traffic)
+- **LeastConnections**: Routes to provider with fewest active connections
+- **CostBased**: Routes to provider with lowest effective cost (cost / success rate)
+- **ResponseTimeBased**: Routes to provider with lowest average latency
+- **Hybrid**: Combines success rate (40%), latency (30%), cost (20%), connections (10%)
+
+### View Provider Metrics
+
+```bash
+# Get metrics for all providers
+curl http://localhost:8080/api/v1/routing/metrics
+
+# Get metrics for specific provider
+curl http://localhost:8080/api/v1/routing/metrics/CARD
+```
+
+### Automatic Failover
+
+When a provider fails (circuit breaker opens), the framework automatically:
+1. Selects next best provider using routing strategy
+2. Retries payment with alternative provider
+3. Tracks metrics for both attempts
+4. Returns result from successful provider
+
+Failover is enabled by default and can be configured in `application.yaml`.
 
 ## ML Integration
 

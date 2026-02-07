@@ -49,6 +49,19 @@ public class PaymentEventProducer {
     }
 
     public void publishResult(PaymentRequest request, PaymentResult result) {
+        if (result == null) {
+            log.error("Cannot publish result: PaymentResult is null for idempotencyKey={}", 
+                    request != null ? request.getIdempotencyKey() : "unknown");
+            return;
+        }
+        
+        // Check for null fields that would indicate a problem
+        if (result.getIdempotencyKey() == null && result.getStatus() == null && result.getAmount() == null) {
+            log.error("PaymentResult has all null fields! idempotencyKey={}, status={}, amount={}, timestamp={}. " +
+                    "This suggests PaymentResult was not built correctly.",
+                    result.getIdempotencyKey(), result.getStatus(), result.getAmount(), result.getTimestamp());
+        }
+        
         String eventType = result.isSuccess() ? "PAYMENT_COMPLETED" : "PAYMENT_FAILED";
         PaymentEvent event = PaymentEvent.builder()
                 .eventId(UUID.randomUUID().toString())

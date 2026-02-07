@@ -38,6 +38,12 @@ payment:
       service:
         url: http://localhost:5001/predict  # Match your ML service port
         timeout: 2000  # milliseconds
+  # Provider routing and failover
+  routing:
+    strategy: WeightedRoundRobin  # Options: WeightedRoundRobin, LeastConnections, CostBased, ResponseTimeBased
+    failover:
+      enabled: true  # Enable automatic failover to alternative providers
+      max-attempts: 3  # Maximum number of providers to try before giving up
 
 # Resilience4j: per-provider circuit breaker, shared retry
 resilience4j:

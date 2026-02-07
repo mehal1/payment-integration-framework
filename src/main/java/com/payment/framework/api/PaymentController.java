@@ -46,6 +46,15 @@ public class PaymentController {
 
         eventProducer.publishRequested(request);
         PaymentResult result = orchestrator.execute(request);
+        
+        if (result == null) {
+            log.error("PaymentOrchestrator.execute() returned null for idempotencyKey={}", request.getIdempotencyKey());
+            throw new IllegalStateException("Payment execution returned null result");
+        }
+        
+        log.debug("Payment execution completed: idempotencyKey={}, status={}, providerTransactionId={}", 
+                result.getIdempotencyKey(), result.getStatus(), result.getProviderTransactionId());
+        
         eventProducer.publishResult(request, result);
 
         return ResponseEntity.ok(PaymentResponseDto.from(result));

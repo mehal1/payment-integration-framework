@@ -27,6 +27,9 @@ public class PaymentResponseDto {
     Map<String, Object> metadata;
 
     public static PaymentResponseDto from(PaymentResult result) {
+        if (result == null) {
+            throw new IllegalArgumentException("PaymentResult cannot be null");
+        }
         return PaymentResponseDto.builder()
                 .idempotencyKey(result.getIdempotencyKey())
                 .providerTransactionId(result.getProviderTransactionId())

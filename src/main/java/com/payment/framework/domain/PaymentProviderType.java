@@ -2,12 +2,12 @@ package com.payment.framework.domain;
 
 /**
  * Supported payment provider types. The framework routes requests to the
- * appropriate adapter based on configuration and request context.
- * New providers are added by implementing {@link com.payment.framework.core.PaymentGateway}
+ * appropriate payment adapter based on configuration and request context.
+ * New payment gateways are added by implementing {@link com.payment.framework.core.PaymentGatewayAdapter}
  * and registering under one of these types.
  */
 public enum PaymentProviderType {
-    /** Card networks (Visa, MC) via a single gateway (e.g. Stripe, Adyen). */
+    /** Card networks (Visa, MC) via payment gateways (e.g. Stripe, Adyen). */
     CARD,
     /** Bank transfers / ACH / SEPA. */
     BANK_TRANSFER,
