@@ -24,6 +24,14 @@ public interface PaymentGatewayAdapter {
     PaymentProviderType getProviderType();
 
     /**
+     * Unique identifier for this gateway adapter (e.g., "STRIPE", "ADYEN", "PAYPAL").
+     * Used for per-gateway circuit breakers and metrics. Defaults to the simple class name.
+     */
+    default String getGatewayName() {
+        return this.getClass().getSimpleName();
+    }
+
+    /**
      * Execute a payment (authorize/capture or equivalent). Implementations must
      * be idempotent with respect to {@link PaymentRequest#getIdempotencyKey()}
      * when the framework delegates idempotency; otherwise they should enforce

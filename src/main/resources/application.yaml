@@ -45,25 +45,23 @@ payment:
       enabled: true  # Enable automatic failover to alternative providers
       max-attempts: 3  # Maximum number of providers to try before giving up
 
-# Resilience4j: per-provider circuit breaker, shared retry
+# Resilience4j: per-gateway circuit breaker (allows failover between gateways of same type)
+# Circuit breakers are created dynamically per gateway name (e.g., "MockPaymentGatewayAdapter", "StripeGateway", "AdyenGateway")
+# Default configuration for all circuit breakers:
 resilience4j:
   circuitbreaker:
+    configs:
+      default:
+        register-health-indicator: true
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
     instances:
-      MOCK:
-        register-health-indicator: true
-        sliding-window-size: 10
-        failure-rate-threshold: 50
-        wait-duration-in-open-state: 30s
-      CARD:
-        register-health-indicator: true
-        sliding-window-size: 10
-        failure-rate-threshold: 50
-        wait-duration-in-open-state: 30s
-      WALLET:
-        register-health-indicator: true
-        sliding-window-size: 10
-        failure-rate-threshold: 50
-        wait-duration-in-open-state: 30s
+      # Per-gateway instances (add specific gateways here if needed)
+      # Example: StripeGateway, AdyenGateway, PayPalGateway
+      # If not specified, uses default config with gateway class name
+      MockPaymentGatewayAdapter:
+        base-config: default
   retry:
     instances:
       payment:

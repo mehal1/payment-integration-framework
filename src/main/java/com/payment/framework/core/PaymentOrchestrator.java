@@ -238,13 +238,18 @@ public class PaymentOrchestrator {
 
     /**
      * Execute payment with a specific payment gateway adapter (with circuit breaker and retry).
+     * Uses per-gateway circuit breaker (e.g., "STRIPE", "ADYEN") instead of per-provider-type
+     * to allow failover between gateways of the same type.
      */
     private PaymentResult executeWithProvider(
             PaymentRequest request, 
             PaymentGatewayAdapter adapter, 
             PaymentProviderType providerType) {
         
-        CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(providerType.name());
+        // Use gateway name for circuit breaker (per-gateway, not per-provider-type)
+        // This allows failover: if Stripe fails, Adyen (also CARD) can still be used
+        String gatewayName = adapter.getGatewayName();
+        CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(gatewayName);
         Retry retry = retryRegistry.retry(RETRY_INSTANCE);
         Supplier<PaymentResult> supplier = () -> adapter.execute(request);
         Supplier<PaymentResult> withRetry = Retry.decorateSupplier(retry, supplier);

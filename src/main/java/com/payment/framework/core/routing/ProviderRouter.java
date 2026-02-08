@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 /**
  * Intelligent payment gateway router that selects the best payment gateway adapter based on routing strategy.
  * Supports multiple payment gateways of the same type (e.g., multiple CARD gateways: Stripe, Adyen).
+ * Uses per-gateway circuit breakers (not per-provider-type) to allow failover between gateways of the same type.
  * Automatically filters out payment gateways with open circuit breakers.
  */
 @Slf4j
@@ -47,10 +48,8 @@ public class ProviderRouter {
 
     /**
      * Select the best payment gateway adapter for the given request.
-     * Filters out payment gateways with open circuit breakers and applies routing strategy.
-     * Note: Currently supports one adapter per provider type. For multiple payment gateways
-     * of the same type (e.g., Stripe and Adyen both CARD), extend PaymentProviderType
-     * or add gateway identifier.
+     * Filters out payment gateways with open circuit breakers (per-gateway, not per-provider-type)
+     * and applies routing strategy. Supports multiple gateways of the same type (e.g., Stripe and Adyen both CARD).
      *
      * @param request payment request
      * @return selected payment adapter, or empty if no healthy payment gateway available
@@ -64,39 +63,43 @@ public class ProviderRouter {
             return Optional.empty();
         }
 
-        // If only one adapter, return it (no routing needed)
-        if (availableAdapters.size() == 1) {
-            PaymentGatewayAdapter adapter = availableAdapters.get(0);
-            CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(requestedType.name());
-            if (cb.getState() == io.github.resilience4j.circuitbreaker.CircuitBreaker.State.OPEN) {
-                log.warn("Only payment adapter for type={} has open circuit breaker", requestedType);
-                return Optional.empty();
-            }
-            return Optional.of(adapter);
-        }
-
-        // Multiple adapters: filter healthy and apply routing strategy
-        List<PaymentProviderType> healthyProviders = availableAdapters.stream()
-                .map(PaymentGatewayAdapter::getProviderType)
-                .distinct()
-                .filter(providerType -> {
-                    CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(providerType.name());
+        // Filter adapters by per-gateway circuit breaker (not per-provider-type)
+        // This allows failover: if Stripe fails, Adyen (also CARD) can still be used
+        List<PaymentGatewayAdapter> healthyAdapters = availableAdapters.stream()
+                .filter(adapter -> {
+                    String gatewayName = adapter.getGatewayName();
+                    CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(gatewayName);
                     boolean isOpen = cb.getState() == io.github.resilience4j.circuitbreaker.CircuitBreaker.State.OPEN;
                     if (isOpen) {
-                        log.debug("Filtering out payment gateway={} due to open circuit breaker", providerType);
+                        log.debug("Filtering out payment gateway={} (type={}) due to open circuit breaker", 
+                                gatewayName, adapter.getProviderType());
                     }
                     return !isOpen;
                 })
                 .collect(Collectors.toList());
 
-        if (healthyProviders.isEmpty()) {
+        if (healthyAdapters.isEmpty()) {
             log.warn("All payment gateways for type={} have open circuit breakers", requestedType);
             return Optional.empty();
         }
 
-        // Apply routing strategy to select best payment gateway
+        // If only one healthy adapter, return it (no routing needed)
+        if (healthyAdapters.size() == 1) {
+            PaymentGatewayAdapter adapter = healthyAdapters.get(0);
+            log.debug("Single healthy adapter available: gateway={}, type={}", 
+                    adapter.getGatewayName(), adapter.getProviderType());
+            return Optional.of(adapter);
+        }
+
+        // Multiple healthy adapters: apply routing strategy
+        // Convert to provider types for routing strategy (strategy works with types)
+        List<PaymentProviderType> healthyProviderTypes = healthyAdapters.stream()
+                .map(PaymentGatewayAdapter::getProviderType)
+                .distinct()
+                .collect(Collectors.toList());
+
         Optional<PaymentProviderType> selectedType = routingStrategy.selectProvider(
-                request, healthyProviders, metrics);
+                request, healthyProviderTypes, metrics);
 
         if (selectedType.isEmpty()) {
             log.warn("Routing strategy returned no payment gateway for type={}", requestedType);
@@ -104,18 +107,21 @@ public class ProviderRouter {
         }
 
         // Find adapter for selected payment gateway type
-        PaymentGatewayAdapter selectedAdapter = availableAdapters.stream()
+        // If multiple adapters have same type, pick first healthy one
+        // (In future, routing strategy could select specific gateway)
+        PaymentGatewayAdapter selectedAdapter = healthyAdapters.stream()
                 .filter(a -> a.getProviderType() == selectedType.get())
                 .findFirst()
                 .orElse(null);
 
         if (selectedAdapter == null) {
-            log.error("Selected payment gateway type={} but no adapter found", selectedType.get());
+            log.error("Selected payment gateway type={} but no healthy adapter found", selectedType.get());
             return Optional.empty();
         }
 
-        log.info("Router selected payment gateway={} using strategy={} for request idempotencyKey={}",
-                selectedType.get(), routingStrategy.getStrategyName(), request.getIdempotencyKey());
+        log.info("Router selected payment gateway={} (type={}) using strategy={} for request idempotencyKey={}",
+                selectedAdapter.getGatewayName(), selectedType.get(), routingStrategy.getStrategyName(), 
+                request.getIdempotencyKey());
 
         return Optional.of(selectedAdapter);
     }
