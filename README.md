@@ -1,8 +1,20 @@
 # Payment Integration Framework
 
-A framework for integrating emerging payment technologies into digital payment systems. This framework standardizes integration patterns to reduce transaction failures, accelerate safe adoption of new payment methods, and mitigate operational and compliance risks .
+A framework for integrating emerging payment technologies into digital payment systems. This framework standardizes integration patterns to reduce transaction failures, accelerate safe adoption of new payment methods, and mitigate operational and compliance risks. Includes intelligent gateway routing, automatic failover, unified fraud detection (single-PSP and cross-PSP), ML-based risk scoring, and audit trails.
+
 
 Built on distributed systems architecture principles using Spring Boot, Kafka, Redis, and AWS, with intelligent ML-based risk detection capabilities.
+
+## Key Benefits
+
+- **Vendor Independence**: Not locked into a single payment gateway - easily switch or add new providers without rewriting code.
+- **Cost Optimization**: Automatically routes to the most cost-effective gateway based on transaction fees and success rates.
+- **High Availability**: Automatic failover to backup gateways when primary gateway fails, ensuring payments continue processing.
+- **Duplicate Charge Prevention**: Built-in idempotency prevents duplicate charges from network retries or user double-clicks.
+- **Unified Fraud Detection**: Detects fraud from single PSP and across multiple PSPs (Stripe, PayPal, Adyen, etc.) - identifies high failure rates and velocity attacks within a single PSP, plus cross-PSP distributed attacks like gateway hopping, distributed velocity, and card testing that individual PSPs miss.
+- **Fraud Protection**: ML-based risk scoring analyzes payments in near-real-time and sends alerts when fraud is detected
+- **Compliance & Audit**: Automatic event logging and audit trails for regulatory compliance and transaction tracking.
+- **Easy Scaling**: Start with one gateway, add more as business grows - framework handles complexity automatically.
 
 ## Features
 
@@ -17,7 +29,10 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 - **REST API**: JSON API with OpenAPI documentation
 - **Health Monitoring**: Actuator endpoints for Kafka, Redis, and circuit breaker health
 
+
 ### Project 2: Intelligent Risk & Fraud Detection System
+
+- **Unified Fraud Detection**: Detects fraud from single PSP or across multiple PSPs by aggregating events by entity (merchant/customer), catching both single-PSP patterns and distributed cross-PSP attacks
 - **ML-Based Risk Analysis**: Machine learning models analyze transaction data and failure patterns (optional ML integration via external service)
 - **Real-Time Risk Identification**: Correlates historical transaction windows with real-time events to identify fraud patterns (high velocity, unusual amounts, repeated failures)
 - **Automated Alert Generation**: Real-time alerts generated automatically when risk score exceeds threshold, enabling earlier intervention
@@ -216,13 +231,13 @@ graph LR
 - **ProviderPerformanceMetrics**: Tracks payment gateway performance (success rate, latency, cost, connections) for intelligent routing
 - **Payment Gateway Adapters** (e.g., `StripePaymentGatewayAdapter`, `AdyenPaymentGatewayAdapter`): Code adapters that wrap external payment gateway APIs (Stripe, Adyen, PayPal) and convert between framework format and gateway-specific formats
 - **IdempotencyService**: Redis-backed cache to prevent duplicate processing
-- **PaymentEventProducer**: Publishes payment lifecycle events to Kafka
-- **RiskEngine**: Evaluates payment events using rules and optional ML scoring
-- **TransactionWindowAggregator**: Aggregates transaction features for risk scoring
+- **PaymentEventProducer**: Publishes payment lifecycle events to Kafka 
+- **RiskEngine**: Evaluates payment events using rules and optional ML scoring, also detects cross-PSP fraud patterns
+- **TransactionWindowAggregator**: Aggregates transaction features across all PSPs by entity (merchant/customer) for risk scoring
 
 **Note on Terminology:**
 - **Payment Gateway Adapters** = Your code classes (`StripePaymentGatewayAdapter`, `AdyenPaymentGatewayAdapter`) that wrap external payment gateways
-- **Payment Gateways** = External services (Stripe, Adyen, PayPal) - industry-standard term for payment processing services
+- **Payment Gateways** or **PSP** = External services (Stripe, Adyen, PayPal) - industry-standard term for payment processing services
 
 ## Configuration
 
@@ -272,19 +287,10 @@ See `src/main/resources/application.yaml` for complete configuration.
 # Run all unit tests
 ./mvnw test
 
-# Run specific Project 2 tests
+# Run specific tests
 ./mvnw test -Dtest=RiskEngineTest
-./mvnw test -Dtest=TransactionWindowAggregatorTest
-./mvnw test -Dtest=RiskAlertControllerTest
-
-# Run all Project 2 tests
-./mvnw test -Dtest=RiskEngineTest,TransactionWindowAggregatorTest,RiskAlertControllerTest
 ```
 
-**Coverage:**
-- `RiskEngine` - Risk scoring rules, ML integration, alert generation
-- `TransactionWindowAggregator` - Feature aggregation over time windows
-- `RiskAlertController` - REST API for alerts
 
 #### Manual Testing: Risk Scenarios
 
@@ -335,7 +341,31 @@ sleep 3
 curl http://localhost:8080/api/v1/risk/alerts?limit=10
 ```
 
-**Test 4: ML Integration** (If ML service is running)
+**Test 4: Cross-PSP Fraud Detection** (Distributed failure pattern)
+```bash
+# Simulate fraudster trying multiple PSPs (in real scenario, these would be different PSPs)
+# All events are aggregated by merchantReference, detecting cross-PSP patterns
+merchant="cross-psp-fraud-123"
+
+# Simulate failures across "different PSPs" (using same MOCK provider for demo)
+for i in {1..3}; do
+  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
+    -H "Content-Type: application/json" \
+    -d "{\"idempotencyKey\":\"psp1-fail-$i\",\"providerType\":\"MOCK\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\"}" > /dev/null
+done
+
+for i in {1..2}; do
+  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
+    -H "Content-Type: application/json" \
+    -d "{\"idempotencyKey\":\"psp2-fail-$i\",\"providerType\":\"MOCK\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\"}" > /dev/null
+done
+
+sleep 3
+curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0] | {entityId, failureRate, riskScore, signalTypes}'
+# Should show aggregated failure rate across all "PSPs" for the merchant
+```
+
+**Test 5: ML Integration** (If ML service is running)
 ```bash
 # Ensure ML service is running on port 5001
 # Check if ML scoring is enabled in application.yaml:
@@ -359,9 +389,10 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0].summary'
 ```
 
 **What it tests:**
-- End-to-end payment execution → Kafka event → risk evaluation → alert generation
-- Redis idempotency with real Redis instance (Testcontainers)
-- Kafka event flow with Embedded Kafka
+- Payment execution API endpoint
+- Redis idempotency with Testcontainers Redis instance
+- Risk alerts API endpoint
+- Uses Embedded Kafka for event infrastructure (full Kafka → risk evaluation flow not verified in this test)
 
 ## Adding a New Payment Gateway
 
@@ -428,15 +459,7 @@ curl http://localhost:8080/api/v1/routing/metrics
 curl http://localhost:8080/api/v1/routing/metrics/CARD
 ```
 
-### Automatic Failover
 
-When a payment gateway fails (circuit breaker opens), the framework automatically:
-1. Selects next best gateway using routing strategy
-2. Retries payment with alternative gateway
-3. Tracks metrics for both attempts
-4. Returns result from successful gateway
-
-Failover is enabled by default and can be configured in `application.yaml`.
 
 ## ML Integration
 
