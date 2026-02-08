@@ -430,11 +430,11 @@ curl http://localhost:8080/api/v1/routing/metrics/CARD
 
 ### Automatic Failover
 
-When a provider fails (circuit breaker opens), the framework automatically:
-1. Selects next best provider using routing strategy
-2. Retries payment with alternative provider
+When a payment gateway fails (circuit breaker opens), the framework automatically:
+1. Selects next best gateway using routing strategy
+2. Retries payment with alternative gateway
 3. Tracks metrics for both attempts
-4. Returns result from successful provider
+4. Returns result from successful gateway
 
 Failover is enabled by default and can be configured in `application.yaml`.
 
