@@ -12,9 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Calls the external ML service (risk-ml-service) to get risk scores.
- * Falls back gracefully if the service is unavailable (returns empty).
- * Enable with: payment.risk.ml.enabled=true
+ * Asks our ML service "is this payment sketchy?" Returns empty if ML service is down.
  */
 @Slf4j
 @Service
@@ -31,7 +29,6 @@ public class MlRiskScorer {
 
     public MlRiskScorer() {
         this.restTemplate = new RestTemplate();
-        // Set timeout
         org.springframework.http.client.SimpleClientHttpRequestFactory factory =
                 new org.springframework.http.client.SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(timeoutMs);
@@ -40,9 +37,8 @@ public class MlRiskScorer {
     }
 
     /**
-     * Get ML risk score from the external service.
-     * @param features Transaction window features
-     * @return Optional risk score (0.0-1.0), empty if service unavailable
+     * Ask ML service how risky this payment is (0.0 = safe, 1.0 = very suspicious).
+     * @return empty if ML service is down or returns garbage
      */
     public Optional<Double> score(TransactionWindowFeatures features) {
         try {

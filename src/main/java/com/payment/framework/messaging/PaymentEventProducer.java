@@ -15,9 +15,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Publishes payment lifecycle events to Kafka for audit, compliance, and
- * downstream analytics (e.g. ML risk/fraud systems). Events are keyed by
- * idempotency key for ordered processing per payment.
+ * Sends payment events to Kafka so other services can react (fraud detection, analytics, etc).
+ * Events are grouped by payment so they stay in order.
  */
 @Slf4j
 @Component
@@ -82,7 +81,6 @@ public class PaymentEventProducer {
     }
 
     private void send(String key, PaymentEvent event) {
-        // Log what we're sending for debugging
         log.info("Publishing payment event: key={}, eventId={}, idempotencyKey={}, amount={}, status={}, eventType={}",
                 key, event.getEventId(), event.getIdempotencyKey(), event.getAmount(), event.getStatus(), event.getEventType());
         CompletableFuture<SendResult<String, PaymentEvent>> future =

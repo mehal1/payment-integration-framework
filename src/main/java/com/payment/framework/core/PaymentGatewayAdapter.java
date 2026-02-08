@@ -5,46 +5,30 @@ import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
 
 /**
- * Standard interface for all payment gateway integrations. Implementing this
- * contract ensures:
- * <ul>
- *   <li>Consistent request/response handling for orchestration and retries</li>
- *   <li>Pluggable gateways without changing core flow</li>
- *   <li>Unified compliance and audit event emission</li>
- * </ul>
- * Adapters are responsible for mapping {@link PaymentRequest} to payment gateway APIs
- * (Stripe, Adyen, PayPal, etc.) and normalizing responses to {@link PaymentResult}.
- * The framework wraps calls with idempotency, circuit breaker, and retry.
+ * What every payment gateway adapter needs to implement.
+ * Takes our standard request, talks to Stripe/PayPal/etc, and gives us back a standard result.
  */
 public interface PaymentGatewayAdapter {
 
-    /**
-     * Payment gateway type this adapter handles. Used by the orchestrator to route requests.
-     */
     PaymentProviderType getProviderType();
 
     /**
-     * Unique identifier for this gateway adapter (e.g., "STRIPE", "ADYEN", "PAYPAL").
-     * Used for per-gateway circuit breakers and metrics. Defaults to the simple class name.
+     * Name of this gateway (like "StripeGateway" or "PayPalAdapter").
+     * Used to track failures separately so one broken gateway doesn't affect others.
      */
     default String getGatewayName() {
         return this.getClass().getSimpleName();
     }
 
     /**
-     * Execute a payment (authorize/capture or equivalent). Implementations must
-     * be idempotent with respect to {@link PaymentRequest#getIdempotencyKey()}
-     * when the framework delegates idempotency; otherwise they should enforce
-     * idempotency themselves.
-     *
-     * @param request canonical payment request
-     * @return normalized result (never null)
+     * Actually charge the customer.
+     * @param request what to charge
+     * @return what happened (success or failure)
      */
     PaymentResult execute(PaymentRequest request);
 
     /**
-     * Check if this adapter is healthy (e.g. payment gateway API reachable). Used by
-     * health indicators and circuit breaker.
+     * Is this gateway working? Used to skip broken ones.
      */
     default boolean isHealthy() {
         return true;

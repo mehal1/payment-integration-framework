@@ -26,9 +26,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
- * Central orchestrator for payment execution with intelligent payment gateway routing and failover.
- * Resolves the best payment gateway adapter using routing strategies, applies idempotency, circuit breaker,
- * and retry. Automatically fails over to alternative payment gateways when primary gateway fails.
+ * Handles payment execution, picks the best gateway, and switches to backups if one fails.
  */
 @Slf4j
 @Service
@@ -69,9 +67,7 @@ public class PaymentOrchestrator {
     }
 
     /**
-     * Execute payment for the given request with intelligent routing and automatic failover.
-     * Uses idempotency key for deduplication, selects best payment gateway using routing strategy,
-     * and automatically fails over to alternative payment gateways if primary fails.
+     * Process a payment - checks for duplicates, picks a gateway, and tries backups if needed.
      */
     public PaymentResult execute(PaymentRequest request) {
         String idempotencyKey = request.getIdempotencyKey();
@@ -80,29 +76,24 @@ public class PaymentOrchestrator {
         log.info("Executing payment: idempotencyKey={}, providerType={}, amount={}, failoverEnabled={}, maxFailoverAttempts={}", 
                 idempotencyKey, requestedType, request.getAmount(), failoverEnabled, maxFailoverAttempts);
 
-        // Check idempotency first
         try {
             Optional<PaymentResult> cached = idempotencyService.getCachedResult(idempotencyKey);
             if (cached.isPresent()) {
                 PaymentResult cachedResult = cached.get();
                 log.info("Returning cached result for idempotencyKey={}, status={}, amount={}", 
                         idempotencyKey, cachedResult.getStatus(), cachedResult.getAmount());
-                // Validate cached result
                 if (cachedResult.getIdempotencyKey() == null || cachedResult.getStatus() == null) {
                     log.error("Cached result has null required fields! idempotencyKey={}, status={}, amount={}. " +
                             "This suggests Redis contains corrupted data. Clearing cache and proceeding with new execution.",
                             cachedResult.getIdempotencyKey(), cachedResult.getStatus(), cachedResult.getAmount());
-                    // Don't return corrupted cached result - proceed with new execution
                 } else {
                     return cachedResult;
                 }
             }
         } catch (Exception e) {
             log.error("Error checking idempotency for idempotencyKey={}", idempotencyKey, e);
-            // Continue with execution even if idempotency check fails
         }
 
-        // Try primary provider with failover
         log.info("Calling executeWithFailover for idempotencyKey={}, providerType={}", idempotencyKey, requestedType);
         PaymentResult result;
         try {
@@ -122,14 +113,13 @@ public class PaymentOrchestrator {
         log.debug("Payment execution result: idempotencyKey={}, status={}, providerTransactionId={}", 
                 result.getIdempotencyKey(), result.getStatus(), result.getProviderTransactionId());
         
-        // Store result for idempotency
         idempotencyService.storeResult(idempotencyKey, result);
         
         return result;
     }
 
     /**
-     * Execute payment with automatic failover to alternative providers.
+     * Try payment with different gateways until one works or we run out of options.
      */
     private PaymentResult executeWithFailover(PaymentRequest request, PaymentProviderType requestedType) {
         log.info("executeWithFailover: requestedType={}, maxFailoverAttempts={}, failoverEnabled={}", 
@@ -139,7 +129,6 @@ public class PaymentOrchestrator {
 
         for (int attempt = 0; attempt < maxFailoverAttempts; attempt++) {
             log.info("Failover attempt {} of {}", attempt + 1, maxFailoverAttempts);
-            // Select adapter using routing strategy
             Optional<PaymentGatewayAdapter> adapterOpt = providerRouter.selectProvider(request);
             
             if (adapterOpt.isEmpty()) {
@@ -155,7 +144,6 @@ public class PaymentOrchestrator {
             PaymentGatewayAdapter adapter = adapterOpt.get();
             PaymentProviderType providerType = adapter.getProviderType();
 
-            // Skip if already attempted
             if (attemptedAdapters.contains(adapter)) {
                 continue;
             }
@@ -175,7 +163,6 @@ public class PaymentOrchestrator {
                     throw new IllegalStateException("Payment adapter returned null result");
                 }
                 
-                // Validate result has required fields
                 if (result.getIdempotencyKey() == null || result.getStatus() == null) {
                     log.error("PaymentResult has null required fields: idempotencyKey={}, status={}, amount={}, timestamp={}", 
                             result.getIdempotencyKey(), result.getStatus(), result.getAmount(), result.getTimestamp());
@@ -184,7 +171,6 @@ public class PaymentOrchestrator {
                 
                 long latencyMs = System.currentTimeMillis() - startTime;
 
-                // Record metrics
                 if (result.getStatus() == TransactionStatus.SUCCESS || 
                     result.getStatus() == TransactionStatus.CAPTURED) {
                     BigDecimal cost = extractCost(result);
@@ -237,9 +223,8 @@ public class PaymentOrchestrator {
     }
 
     /**
-     * Execute payment with a specific payment gateway adapter (with circuit breaker and retry).
-     * Uses per-gateway circuit breaker (e.g., "STRIPE", "ADYEN") instead of per-provider-type
-     * to allow failover between gateways of the same type.
+     * Actually call the gateway with retries and circuit breaker protection.
+     * Each gateway gets its own circuit breaker so one failure doesn't block others.
      */
     private PaymentResult executeWithProvider(
             PaymentRequest request, 
@@ -270,7 +255,7 @@ public class PaymentOrchestrator {
                 return BigDecimal.valueOf(((Number) costObj).doubleValue());
             }
         }
-        return BigDecimal.ZERO; // Default: no cost tracking
+        return BigDecimal.ZERO;
     }
 
     public Optional<PaymentGatewayAdapter> getAdapter(PaymentProviderType type) {

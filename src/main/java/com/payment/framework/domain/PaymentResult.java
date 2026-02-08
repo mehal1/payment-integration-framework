@@ -10,9 +10,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * Canonical result of a payment operation. Normalized from provider-specific
- * responses so that orchestration, retries, and compliance handling are
- * provider-agnostic.
+ * What happened when we tried to charge someone. Standardized so all gateways look the same.
  */
 @Value
 @Builder
@@ -20,31 +18,14 @@ import java.util.Map;
 @JsonPOJOBuilder(withPrefix = "")
 public class PaymentResult {
 
-    /** Idempotency key from the request (for deduplication). */
     String idempotencyKey;
-
-    /** Provider's transaction/payment ID (for refunds and reconciliation). */
     String providerTransactionId;
-
-    /** Normalized status. */
     TransactionStatus status;
-
-    /** Amount (e.g. authorized amount). */
     BigDecimal amount;
-
-    /** ISO 4217 currency. */
     String currencyCode;
-
-    /** Human-readable or machine code for failure reason. */
     String failureCode;
-
-    /** Optional message for logging/support. */
     String message;
-
-    /** When the result was produced (provider or framework). */
     Instant timestamp;
-
-    /** Raw or extended data from provider (e.g. 3DS, risk score). */
     Map<String, Object> metadata;
 
     public boolean isSuccess() {

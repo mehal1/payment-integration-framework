@@ -12,26 +12,21 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Maintains rolling-window aggregates per entity (e.g. merchant) for risk scoring.
- * Uses in-memory storage; for production scale, replace with Redis or a proper
- * stream processor (e.g. Kafka Streams, Flink). Events older than windowMs are evicted.
+ * Tracks how many payments happened recently, how many failed, average amounts, etc.
+ * Keeps a rolling window of the last 5 minutes, forgets older stuff.
  */
 @Slf4j
 @Component
 public class TransactionWindowAggregator {
 
-    private static final long WINDOW_MS = 5 * 60 * 1000L;  // 5 minutes
+    private static final long WINDOW_MS = 5 * 60 * 1000L;
     private static final long VELOCITY_1_MIN_MS = 60 * 1000L;
     private static final String ENTITY_TYPE_MERCHANT = "MERCHANT";
 
     private final Map<String, List<EventEntry>> store = new ConcurrentHashMap<>();
 
-    /**
-     * Record an event and evict older entries for that entity.
-     */
     public void record(PaymentEvent event) {
         String entityId = entityIdFrom(event);
-        // Handle null timestamp - use current time as fallback
         long timestampMs = event.getTimestamp() != null 
                 ? event.getTimestamp().toEpochMilli() 
                 : System.currentTimeMillis();
@@ -50,9 +45,6 @@ public class TransactionWindowAggregator {
         });
     }
 
-    /**
-     * Compute features for the given entity over the last window.
-     */
     public Optional<TransactionWindowFeatures> getFeatures(String entityId) {
         List<EventEntry> entries = store.get(entityId);
         if (entries == null || entries.isEmpty()) return Optional.empty();

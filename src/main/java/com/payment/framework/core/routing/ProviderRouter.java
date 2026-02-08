@@ -15,10 +15,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * Intelligent payment gateway router that selects the best payment gateway adapter based on routing strategy.
- * Supports multiple payment gateways of the same type (e.g., multiple CARD gateways: Stripe, Adyen).
- * Uses per-gateway circuit breakers (not per-provider-type) to allow failover between gateways of the same type.
- * Automatically filters out payment gateways with open circuit breakers.
+ * Picks which gateway to use based on cost, speed, or round-robin.
+ * Skips gateways that are currently broken.
  */
 @Slf4j
 @Service
@@ -47,12 +45,7 @@ public class ProviderRouter {
     }
 
     /**
-     * Select the best payment gateway adapter for the given request.
-     * Filters out payment gateways with open circuit breakers (per-gateway, not per-provider-type)
-     * and applies routing strategy. Supports multiple gateways of the same type (e.g., Stripe and Adyen both CARD).
-     *
-     * @param request payment request
-     * @return selected payment adapter, or empty if no healthy payment gateway available
+     * Find a good gateway for this payment. Skips broken ones and uses our routing rules.
      */
     public Optional<PaymentGatewayAdapter> selectProvider(PaymentRequest request) {
         PaymentProviderType requestedType = request.getProviderType();
@@ -126,9 +119,6 @@ public class ProviderRouter {
         return Optional.of(selectedAdapter);
     }
 
-    /**
-     * Get all available payment gateways for a given type (including unhealthy ones).
-     */
     public List<PaymentProviderType> getAvailableProviders(PaymentProviderType type) {
         return adaptersByType.getOrDefault(type, new ArrayList<>()).stream()
                 .map(PaymentGatewayAdapter::getProviderType)

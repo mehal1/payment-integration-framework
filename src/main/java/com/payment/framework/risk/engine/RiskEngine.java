@@ -17,17 +17,14 @@ import java.util.*;
 
 
 /**
- * Rule-based risk engine with optional ML extension point. Evaluates aggregated
- * features and current event to produce a risk score and signal types. No LLM
- * here; use {@link com.payment.framework.risk.llm.AlertSummaryService} for optional
- * human-readable summaries.
+ * Checks if a payment looks suspicious. Uses simple rules by default, but can use ML if available.
  */
 @Slf4j
 @Service
 public class RiskEngine {
 
     private final TransactionWindowAggregator aggregator;
-    private final MlRiskScorer mlScorer; // Optional: null if ML is disabled
+    private final MlRiskScorer mlScorer;
 
     public RiskEngine(TransactionWindowAggregator aggregator,
                       @Autowired(required = false) MlRiskScorer mlScorer) {
@@ -43,7 +40,7 @@ public class RiskEngine {
     private double alertScoreThreshold;
 
     /**
-     * Process an event: update aggregates, compute features, score, and return alert if above threshold.
+     * Look at a payment and decide if it's suspicious. Returns an alert if something's wrong.
      */
     public Optional<RiskAlert> evaluate(PaymentEvent event) {
         aggregator.record(event);
@@ -63,14 +60,11 @@ public class RiskEngine {
                 log.debug("Using ML score: {} for entity {}", mlScore, features.getEntityId());
                 score = mlScore;
                 mlUsed = true;
-                // Still compute signals from rules for context
                 computeRuleSignals(features, event, signals);
             } else {
-                // ML service unavailable, fallback to rules
                 score = computeRuleScore(features, event, signals);
             }
         } else {
-            // ML not enabled, use rules
             score = computeRuleScore(features, event, signals);
         }
 
@@ -101,13 +95,9 @@ public class RiskEngine {
         return Optional.of(alert);
     }
 
-    /**
-     * Compute risk score using rules (fallback when ML is unavailable).
-     */
     private double computeRuleScore(TransactionWindowFeatures features, PaymentEvent event, Set<RiskSignalType> signals) {
         double score = 0.0;
 
-        // Rule: high failure rate
         if (features.getFailureRate() >= highFailureRateThreshold) {
             signals.add(RiskSignalType.HIGH_FAILURE_RATE);
             score = Math.max(score, 0.4 + features.getFailureRate() * 0.4);
@@ -117,13 +107,11 @@ public class RiskEngine {
             score = Math.max(score, 0.5);
         }
 
-        // Rule: velocity
         if (features.getCountLast1Min() >= velocity1MinThreshold) {
             signals.add(RiskSignalType.HIGH_VELOCITY);
             score = Math.max(score, 0.3 + Math.min(0.4, features.getCountLast1Min() / 50.0));
         }
 
-        // Rule: unusual amount (simple: above 2x avg in window)
         if (features.getTotalCount() >= 3 && event.getAmount() != null && features.getAvgAmount().compareTo(BigDecimal.ZERO) > 0) {
             double ratio = event.getAmount().doubleValue() / features.getAvgAmount().doubleValue();
             if (ratio >= 2.0) {
@@ -135,9 +123,6 @@ public class RiskEngine {
         return score;
     }
 
-    /**
-     * Compute rule-based signals (used for context even when ML is active).
-     */
     private void computeRuleSignals(TransactionWindowFeatures features, PaymentEvent event, Set<RiskSignalType> signals) {
         if (features.getFailureRate() >= highFailureRateThreshold) {
             signals.add(RiskSignalType.HIGH_FAILURE_RATE);
