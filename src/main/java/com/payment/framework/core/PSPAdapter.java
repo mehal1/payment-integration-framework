@@ -5,18 +5,18 @@ import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
 
 /**
- * What every payment gateway adapter needs to implement.
- * Takes our standard request, talks to Stripe/PayPal/etc, and gives us back a standard result.
+ * What every PSP adapter needs to implement.
+ * Takes our standard request, talks to Stripe/PayPal/etc (Payment Service Providers), and gives us back a standard result.
  */
-public interface PaymentGatewayAdapter {
+public interface PSPAdapter {
 
     PaymentProviderType getProviderType();
 
     /**
-     * Name of this gateway (like "StripeGateway" or "PayPalAdapter").
-     * Used to track failures separately so one broken gateway doesn't affect others.
+     * Name of this PSP adapter (like "StripeAdapter" or "PayPalAdapter").
+     * Used to track failures separately so one broken PSP doesn't affect others.
      */
-    default String getGatewayName() {
+    default String getPSPAdapterName() {
         return this.getClass().getSimpleName();
     }
 
@@ -28,7 +28,7 @@ public interface PaymentGatewayAdapter {
     PaymentResult execute(PaymentRequest request);
 
     /**
-     * Is this gateway working? Used to skip broken ones.
+     * Is this PSP working? Used to skip broken ones.
      */
     default boolean isHealthy() {
         return true;

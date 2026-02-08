@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * What happened when we tried to charge someone. Standardized so all gateways look the same.
+ * What happened when we tried to charge someone. Standardized so all PSPs look the same.
  */
 @Value
 @Builder

@@ -7,24 +7,24 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 
 ## Key Benefits
 
-- **Vendor Independence**: Not locked into a single payment gateway - easily switch or add new providers without rewriting code.
-- **Cost Optimization**: Automatically routes to the most cost-effective gateway based on transaction fees and success rates.
-- **High Availability**: Automatic failover to backup gateways when primary gateway fails, ensuring payments continue processing.
+- **Vendor Independence**: Not locked into a single PSP - easily switch or add new providers without rewriting code.
+- **Cost Optimization**: Automatically routes to the most cost-effective PSP based on transaction fees and success rates.
+- **High Availability**: Automatic failover to backup PSPs when primary PSP fails, ensuring payments continue processing.
 - **Duplicate Charge Prevention**: Built-in idempotency prevents duplicate charges from network retries or user double-clicks.
 - **Unified Fraud Detection**: Detects fraud from single PSP and across multiple PSPs (Stripe, PayPal, Adyen, etc.) - identifies high failure rates and velocity attacks within a single PSP, plus cross-PSP distributed attacks like gateway hopping, distributed velocity, and card testing that individual PSPs miss.
 - **Fraud Protection**: ML-based risk scoring analyzes payments in near-real-time and sends alerts when fraud is detected
 - **Compliance & Audit**: Automatic event logging and audit trails for regulatory compliance and transaction tracking.
-- **Easy Scaling**: Start with one gateway, add more as business grows - framework handles complexity automatically.
+- **Easy Scaling**: Start with one PSP, add more as business grows - framework handles complexity automatically.
 
 ## Features
 
 ### Project 1: Payment Integration Framework
-- **Pluggable Payment Gateway Adapters**: Support for card, wallet, BNPL, crypto, and bank transfer payment gateways (Stripe, Adyen, PayPal, etc.)
-- **Intelligent Gateway Routing**: Multiple routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, Response Time-Based, Hybrid)
-- **Automatic Failover**: Automatically fails over to alternative payment gateways when primary gateway fails
-- **Gateway Performance Metrics**: Tracks success rate, latency, cost, and active connections per payment gateway
+- **Pluggable PSP Adapters**: Support for card, wallet, BNPL, crypto, and bank transfer PSPs (Stripe, Adyen, PayPal, etc.)
+- **Intelligent PSP Routing**: Multiple routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, Response Time-Based, Hybrid)
+- **Automatic Failover**: Automatically fails over to alternative PSPs when primary PSP fails
+- **PSP Performance Metrics**: Tracks success rate, latency, cost, and active connections per PSP
 - **Idempotency**: Redis-backed idempotency to prevent duplicate charges
-- **Resilience**: Circuit breakers and retry logic (Resilience4j) per payment gateway
+- **Resilience**: Circuit breakers and retry logic (Resilience4j) per PSP
 - **Event-Driven Architecture**: Kafka events for audit, compliance, and downstream ML/analytics
 - **REST API**: JSON API with OpenAPI documentation
 - **Health Monitoring**: Actuator endpoints for Kafka, Redis, and circuit breaker health
@@ -37,7 +37,7 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 - **Real-Time Risk Identification**: Correlates historical transaction windows with real-time events to identify fraud patterns (high velocity, unusual amounts, repeated failures)
 - **Automated Alert Generation**: Real-time alerts generated automatically when risk score exceeds threshold, enabling earlier intervention
 - **Hybrid Risk Scoring**: Rule-based engine with optional ML integration - falls back to rules when ML service unavailable
-- **Transaction Window Features**: Aggregates features over rolling time windows (5-minute window, 1-minute velocity) for risk scoring and ML model training
+- **Transaction Window Features**: Computes metrics (velocity, failure rate, average amount, max amount) over rolling time windows (5-minute window, 1-minute velocity) per entity (merchant/customer) - aggregates events from single PSP or across multiple PSPs for comprehensive fraud and risk analysis
 - **In-Memory Alert Store**: Last 100 alerts available via REST API for monitoring and analysis
 
 ## Tech Stack
@@ -103,7 +103,7 @@ Expected response:
 curl -X POST http://localhost:8080/api/v1/payments/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "idempotencyKey": "test-1",
+    "idempotencyKey": "test-2",
     "providerType": "MOCK",
     "amount": 100.50,
     "currencyCode": "USD",
@@ -172,6 +172,15 @@ Simple end-to-end flow from customer checkout to response:
 ### System Architecture Diagram
 
 ```mermaid
+---
+config:
+  themeVariables:
+    fontSize: 24px
+    fontFamily: ''
+    primaryTextColor: '#000000'
+    lineColor: '#333333'
+  layout: dagre
+---
 graph LR
     subgraph CL["Client Layer"]
         Client[Client Applications]
@@ -180,7 +189,7 @@ graph LR
     subgraph PS["Payment Service"]
         API[REST API]
         Orchestrator[Payment Orchestrator]
-        Adapters[Payment Gateway Adapters<br/>StripePaymentGatewayAdapter,<br/>AdyenPaymentGatewayAdapter]
+        Adapters[PSP Adapters<br/>StripeAdapter,<br/>AdyenAdapter]
     end
 
     subgraph RS["Risk Service"]
@@ -197,14 +206,14 @@ graph LR
 
     subgraph ES["External Services"]
         MLService[ML Service]
-        PaymentGateways[Payment Gateways<br/>Stripe, Adyen, PayPal]
+        PSPs[PSPs<br/>Stripe, Adyen, PayPal]
     end
 
     Client -->|Payment Request| API
     API --> Orchestrator
     Orchestrator -->|Idempotency| Redis
     Orchestrator --> Adapters
-    Adapters -->|API Calls| PaymentGateways
+    Adapters -->|API Calls| PSPs
     Orchestrator -->|Publish Events| Kafka
     
     Kafka -->|Consume| Consumer
@@ -226,18 +235,18 @@ graph LR
 
 ### Key Components
 
-- **PaymentOrchestrator**: Routes requests to appropriate payment gateway adapter with intelligent routing and automatic failover, applies idempotency, circuit breakers, and retries
-- **ProviderRouter**: Selects best payment gateway (Stripe, Adyen, etc.) using configurable routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, etc.)
-- **ProviderPerformanceMetrics**: Tracks payment gateway performance (success rate, latency, cost, connections) for intelligent routing
-- **Payment Gateway Adapters** (e.g., `StripePaymentGatewayAdapter`, `AdyenPaymentGatewayAdapter`): Code adapters that wrap external payment gateway APIs (Stripe, Adyen, PayPal) and convert between framework format and gateway-specific formats
+- **PaymentOrchestrator**: Routes requests to appropriate PSP adapter with intelligent routing and automatic failover, applies idempotency, circuit breakers, and retries
+- **ProviderRouter**: Selects best PSP (Stripe, Adyen, etc.) using configurable routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, etc.)
+- **ProviderPerformanceMetrics**: Tracks PSP performance (success rate, latency, cost, connections) for intelligent routing
+- **PSP Adapters** (e.g., `StripeAdapter`, `AdyenAdapter`): Code adapters that wrap external PSP APIs (Stripe, Adyen, PayPal) and convert between framework format and PSP-specific formats
 - **IdempotencyService**: Redis-backed cache to prevent duplicate processing
 - **PaymentEventProducer**: Publishes payment lifecycle events to Kafka 
 - **RiskEngine**: Evaluates payment events using rules and optional ML scoring, also detects cross-PSP fraud patterns
 - **TransactionWindowAggregator**: Aggregates transaction features across all PSPs by entity (merchant/customer) for risk scoring
 
 **Note on Terminology:**
-- **Payment Gateway Adapters** = Your code classes (`StripePaymentGatewayAdapter`, `AdyenPaymentGatewayAdapter`) that wrap external payment gateways
-- **Payment Gateways** or **PSP** = External services (Stripe, Adyen, PayPal) - industry-standard term for payment processing services
+- **PSP Adapters** = Your code classes (`StripeAdapter`, `AdyenAdapter`) that wrap external PSPs
+- **PSP** (Payment Service Provider) = External services (Stripe, Adyen, PayPal) - industry-standard term for payment processing services
 
 ## Configuration
 
@@ -252,8 +261,8 @@ Key configuration properties in `application.yaml`:
 | `payment.risk.ml.enabled` | `true` | Enable ML scoring |
 | `payment.risk.ml.service.url` | `http://localhost:5001/predict` | ML service endpoint |
 | `payment.routing.strategy` | `WeightedRoundRobin` | Routing strategy (WeightedRoundRobin, LeastConnections, CostBased, ResponseTimeBased, Hybrid) |
-| `payment.routing.failover.enabled` | `true` | Enable automatic failover to alternative payment gateways |
-| `payment.routing.failover.max-attempts` | `3` | Maximum number of payment gateways to try before giving up |
+| `payment.routing.failover.enabled` | `true` | Enable automatic failover to alternative PSPs |
+| `payment.routing.failover.max-attempts` | `3` | Maximum number of PSPs to try before giving up |
 
 See `src/main/resources/application.yaml` for complete configuration.
 
@@ -270,13 +279,11 @@ See `src/main/resources/application.yaml` for complete configuration.
 
 # Run specific Project 1 tests
 ./mvnw test -Dtest=PaymentControllerTest
-./mvnw test -Dtest=PaymentOrchestratorTest
-./mvnw test -Dtest=IdempotencyServiceTest
 ```
 
 **Coverage:**
 - `PaymentController` - REST API endpoints, validation, response format
-- `PaymentOrchestrator` - Payment gateway adapter routing, idempotency, circuit breakers
+- `PaymentOrchestrator` - PSP adapter routing, idempotency, circuit breakers
 - `IdempotencyService` - Redis operations (mocked)
 
 ### Project 2: Risk & Fraud Detection Tests
@@ -312,7 +319,7 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10
 
 **Test 2: High Failure Rate Alert** (Multiple failures)
 ```bash
-# Trigger multiple failing payments (amount >= 999999 triggers failure in MockPaymentGatewayAdapter)
+# Trigger multiple failing payments (amount >= 999999 triggers failure in MockPSPAdapter)
 for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
@@ -394,15 +401,15 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0].summary'
 - Risk alerts API endpoint
 - Uses Embedded Kafka for event infrastructure (full Kafka → risk evaluation flow not verified in this test)
 
-## Adding a New Payment Gateway
+## Adding a New PSP
 
-To add support for a new payment gateway (e.g., Square, Braintree):
+To add support for a new PSP (e.g., Square, Braintree):
 
-1. **Implement `PaymentGatewayAdapter` interface** (creates a payment gateway adapter):
+1. **Implement `PSPAdapter` interface** (creates a PSP adapter):
 
 ```java
 @Component
-public class StripePaymentGatewayAdapter implements PaymentGatewayAdapter {
+public class StripeAdapter implements PSPAdapter {
     @Override
     public PaymentProviderType getProviderType() {
         return PaymentProviderType.CARD;

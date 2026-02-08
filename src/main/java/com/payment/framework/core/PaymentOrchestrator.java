@@ -25,9 +25,9 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
-/**
- * Handles payment execution, picks the best gateway, and switches to backups if one fails.
- */
+    /**
+     * Handles payment execution, picks the best PSP, and switches to backups if one fails.
+     */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -35,7 +35,7 @@ public class PaymentOrchestrator {
 
     private static final String RETRY_INSTANCE = "payment";
 
-    private final List<PaymentGatewayAdapter> adapters;
+    private final List<PSPAdapter> adapters;
     private final IdempotencyService idempotencyService;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final RetryRegistry retryRegistry;
@@ -48,17 +48,17 @@ public class PaymentOrchestrator {
     @Value("${payment.routing.failover.max-attempts:3}")
     private int maxFailoverAttempts;
 
-    private Map<PaymentProviderType, PaymentGatewayAdapter> adapterByType;
+    private Map<PaymentProviderType, PSPAdapter> adapterByType;
 
     @jakarta.annotation.PostConstruct
     void init() {
-        log.info("Initializing PaymentOrchestrator with {} payment gateway adapters", adapters.size());
+        log.info("Initializing PaymentOrchestrator with {} PSP adapters", adapters.size());
         if (adapters.isEmpty()) {
-            log.warn("No payment gateway adapters found! Make sure adapters are annotated with @Component and implement PaymentGatewayAdapter");
+            log.warn("No PSP adapters found! Make sure adapters are annotated with @Component and implement PSPAdapter");
         }
         adapterByType = adapters.stream()
-                .collect(Collectors.toMap(PaymentGatewayAdapter::getProviderType, a -> a));
-        log.info("Registered payment gateway adapters: {}", adapterByType.keySet());
+                .collect(Collectors.toMap(PSPAdapter::getProviderType, a -> a));
+        log.info("Registered PSP adapters: {}", adapterByType.keySet());
         log.info("PaymentOrchestrator configuration: failoverEnabled={}, maxFailoverAttempts={}", 
                 failoverEnabled, maxFailoverAttempts);
         if (maxFailoverAttempts <= 0) {
@@ -67,7 +67,7 @@ public class PaymentOrchestrator {
     }
 
     /**
-     * Process a payment - checks for duplicates, picks a gateway, and tries backups if needed.
+     * Process a payment - checks for duplicates, picks a PSP, and tries backups if needed.
      */
     public PaymentResult execute(PaymentRequest request) {
         String idempotencyKey = request.getIdempotencyKey();
@@ -119,29 +119,29 @@ public class PaymentOrchestrator {
     }
 
     /**
-     * Try payment with different gateways until one works or we run out of options.
+     * Try payment with different PSP adapters until one works or we run out of options.
      */
     private PaymentResult executeWithFailover(PaymentRequest request, PaymentProviderType requestedType) {
         log.info("executeWithFailover: requestedType={}, maxFailoverAttempts={}, failoverEnabled={}", 
                 requestedType, maxFailoverAttempts, failoverEnabled);
-        List<PaymentGatewayAdapter> attemptedAdapters = new ArrayList<>();
+        List<PSPAdapter> attemptedAdapters = new ArrayList<>();
         Exception lastException = null;
 
         for (int attempt = 0; attempt < maxFailoverAttempts; attempt++) {
             log.info("Failover attempt {} of {}", attempt + 1, maxFailoverAttempts);
-            Optional<PaymentGatewayAdapter> adapterOpt = providerRouter.selectProvider(request);
+            Optional<PSPAdapter> adapterOpt = providerRouter.selectProvider(request);
             
             if (adapterOpt.isEmpty()) {
-                log.warn("No healthy payment gateway available for type={} after {} attempts", 
+                log.warn("No healthy PSP available for type={} after {} attempts", 
                         requestedType, attempt);
                 PaymentResult failureResult = buildFailureResult(request, "NO_PROVIDER_AVAILABLE", 
-                        "No healthy payment gateway available");
+                        "No healthy PSP available");
                 log.debug("Built failure result: status={}, idempotencyKey={}", 
                         failureResult.getStatus(), failureResult.getIdempotencyKey());
                 return failureResult;
             }
 
-            PaymentGatewayAdapter adapter = adapterOpt.get();
+            PSPAdapter adapter = adapterOpt.get();
             PaymentProviderType providerType = adapter.getProviderType();
 
             if (attemptedAdapters.contains(adapter)) {
@@ -212,29 +212,28 @@ public class PaymentOrchestrator {
             }
         }
 
-        // All payment gateways failed
-        log.error("All payment gateway attempts failed for type={} after {} attempts",
+        log.error("All PSP attempts failed for type={} after {} attempts",
                 requestedType, attemptedAdapters.size());
         PaymentResult failureResult = buildFailureResult(request, "ALL_PROVIDERS_FAILED",
-                "All payment gateways failed: " + attemptedAdapters.size() + " gateways attempted");
+                "All PSPs failed: " + attemptedAdapters.size() + " PSPs attempted");
         log.debug("Built final failure result: status={}, idempotencyKey={}, message={}", 
                 failureResult.getStatus(), failureResult.getIdempotencyKey(), failureResult.getMessage());
         return failureResult;
     }
 
     /**
-     * Actually call the gateway with retries and circuit breaker protection.
-     * Each gateway gets its own circuit breaker so one failure doesn't block others.
+     * Actually call the PSP with retries and circuit breaker protection.
+     * Each PSP gets its own circuit breaker so one failure doesn't block others.
      */
     private PaymentResult executeWithProvider(
             PaymentRequest request, 
-            PaymentGatewayAdapter adapter, 
+            PSPAdapter adapter, 
             PaymentProviderType providerType) {
         
-        // Use gateway name for circuit breaker (per-gateway, not per-provider-type)
+        // Use PSP adapter name for circuit breaker (per-PSP adapter, not per-provider-type)
         // This allows failover: if Stripe fails, Adyen (also CARD) can still be used
-        String gatewayName = adapter.getGatewayName();
-        CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(gatewayName);
+        String pspAdapterName = adapter.getPSPAdapterName();
+        CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(pspAdapterName);
         Retry retry = retryRegistry.retry(RETRY_INSTANCE);
         Supplier<PaymentResult> supplier = () -> adapter.execute(request);
         Supplier<PaymentResult> withRetry = Retry.decorateSupplier(retry, supplier);
@@ -258,7 +257,7 @@ public class PaymentOrchestrator {
         return BigDecimal.ZERO;
     }
 
-    public Optional<PaymentGatewayAdapter> getAdapter(PaymentProviderType type) {
+    public Optional<PSPAdapter> getAdapter(PaymentProviderType type) {
         return Optional.ofNullable(adapterByType.get(type));
     }
 

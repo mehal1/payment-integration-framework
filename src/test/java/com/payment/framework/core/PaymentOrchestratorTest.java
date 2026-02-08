@@ -18,7 +18,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -28,7 +27,6 @@ import io.github.resilience4j.retry.RetryRegistry;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.lenient;
@@ -37,14 +35,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for PaymentOrchestrator (idempotency and gateway routing).
+ * Unit tests for PaymentOrchestrator (idempotency and PSP routing).
  * Does not require Kafka or Redis.
  */
 @ExtendWith(MockitoExtension.class)
 class PaymentOrchestratorTest {
 
 	@Mock
-	private PaymentGatewayAdapter mockAdapter;
+	private PSPAdapter mockAdapter;
 	@Mock
 	private IdempotencyService idempotencyService;
 	@Mock
@@ -61,9 +59,9 @@ class PaymentOrchestratorTest {
 	@BeforeEach
 	void setUp() {
 		when(mockAdapter.getProviderType()).thenReturn(PaymentProviderType.MOCK);
-		when(mockAdapter.getGatewayName()).thenReturn("MockPaymentGatewayAdapter");
+		lenient().when(mockAdapter.getPSPAdapterName()).thenReturn("MockPSPAdapter");
 		io.github.resilience4j.circuitbreaker.CircuitBreaker cb =
-				io.github.resilience4j.circuitbreaker.CircuitBreaker.ofDefaults("MockPaymentGatewayAdapter");
+				io.github.resilience4j.circuitbreaker.CircuitBreaker.ofDefaults("MockPSPAdapter");
 		io.github.resilience4j.retry.Retry retry =
 				io.github.resilience4j.retry.Retry.ofDefaults("payment");
 		lenient().when(circuitBreakerRegistry.circuitBreaker(any())).thenReturn(cb);
@@ -101,12 +99,14 @@ class PaymentOrchestratorTest {
 
 	@Test
 	void getAdapterReturnsAdapterForRegisteredType() {
-		Optional<PaymentGatewayAdapter> adapter = orchestrator.getAdapter(PaymentProviderType.MOCK);
+		// This test doesn't need getPSPAdapterName() stubbing
+		Optional<PSPAdapter> adapter = orchestrator.getAdapter(PaymentProviderType.MOCK);
 		assertThat(adapter).isPresent().get().isSameAs(mockAdapter);
 	}
 
 	@Test
 	void getAdapterReturnsEmptyForUnregisteredType() {
+		// This test doesn't need getPSPAdapterName() stubbing
 		assertThat(orchestrator.getAdapter(PaymentProviderType.CARD)).isEmpty();
 	}
 
@@ -157,7 +157,7 @@ class PaymentOrchestratorTest {
 				.slidingWindowSize(10)
 				.build();
 		CircuitBreakerRegistry realCbRegistry = CircuitBreakerRegistry.of(cbConfig);
-		when(circuitBreakerRegistry.circuitBreaker(any())).thenReturn(realCbRegistry.circuitBreaker("MockPaymentGatewayAdapter"));
+		when(circuitBreakerRegistry.circuitBreaker(any())).thenReturn(realCbRegistry.circuitBreaker("MockPSPAdapter"));
 
 		PaymentRequest request = PaymentRequest.builder()
 				.idempotencyKey("retry-test")
@@ -205,7 +205,7 @@ class PaymentOrchestratorTest {
 				.waitDurationInOpenState(Duration.ofMillis(100))
 				.build();
 		CircuitBreakerRegistry realCbRegistry = CircuitBreakerRegistry.of(cbConfig);
-		CircuitBreaker cb = realCbRegistry.circuitBreaker("MockPaymentGatewayAdapter");
+		CircuitBreaker cb = realCbRegistry.circuitBreaker("MockPSPAdapter");
 		when(circuitBreakerRegistry.circuitBreaker(any())).thenReturn(cb);
 
 		// Setup: Create real retry
@@ -216,40 +216,55 @@ class PaymentOrchestratorTest {
 		RetryRegistry realRetryRegistry = RetryRegistry.of(retryConfig);
 		when(retryRegistry.retry(any())).thenReturn(realRetryRegistry.retry("payment"));
 
-		PaymentRequest request = PaymentRequest.builder()
-				.idempotencyKey("cb-test")
+		PaymentRequest request1 = PaymentRequest.builder()
+				.idempotencyKey("cb-test-1")
 				.providerType(PaymentProviderType.MOCK)
 				.amount(new BigDecimal("10.00"))
 				.currencyCode("USD")
 				.build();
 
-		when(idempotencyService.getCachedResult("cb-test")).thenReturn(Optional.empty());
+		PaymentRequest request2 = PaymentRequest.builder()
+				.idempotencyKey("cb-test-2")
+				.providerType(PaymentProviderType.MOCK)
+				.amount(new BigDecimal("10.00"))
+				.currencyCode("USD")
+				.build();
+
+		PaymentRequest request3 = PaymentRequest.builder()
+				.idempotencyKey("cb-test-3")
+				.providerType(PaymentProviderType.MOCK)
+				.amount(new BigDecimal("10.00"))
+				.currencyCode("USD")
+				.build();
+
+		when(idempotencyService.getCachedResult(any())).thenReturn(Optional.empty());
 		when(providerRouter.selectProvider(any(PaymentRequest.class))).thenReturn(Optional.of(mockAdapter));
 
 		// First 2 calls fail (will open circuit breaker)
-		when(mockAdapter.execute(request))
+		when(mockAdapter.execute(any(PaymentRequest.class)))
 				.thenThrow(new RuntimeException("Failure 1"))
 				.thenThrow(new RuntimeException("Failure 2"));
 
-		// Execute first call (fails)
-		assertThatThrownBy(() -> orchestrator.execute(request))
-				.isInstanceOf(RuntimeException.class)
-				.hasMessageContaining("Failure 1");
+		// Execute first call (fails, returns failure result)
+		PaymentResult result1 = orchestrator.execute(request1);
+		assertThat(result1.getStatus()).isEqualTo(TransactionStatus.FAILED);
+		assertThat(result1.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
 
 		// Execute second call (fails, should open circuit breaker)
-		assertThatThrownBy(() -> orchestrator.execute(request))
-				.isInstanceOf(RuntimeException.class)
-				.hasMessageContaining("Failure 2");
+		PaymentResult result2 = orchestrator.execute(request2);
+		assertThat(result2.getStatus()).isEqualTo(TransactionStatus.FAILED);
+		assertThat(result2.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
 
 		// Verify circuit breaker is OPEN
 		assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.OPEN);
 
-		// Third call should be blocked by circuit breaker (CallNotPermittedException)
-		assertThatThrownBy(() -> orchestrator.execute(request))
-				.isInstanceOf(CallNotPermittedException.class);
+		// Third call should be blocked by circuit breaker (returns failure result)
+		PaymentResult result3 = orchestrator.execute(request3);
+		assertThat(result3.getStatus()).isEqualTo(TransactionStatus.FAILED);
+		assertThat(result3.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
 
 		// Verify adapter.execute was only called 2 times (circuit breaker blocked the 3rd)
-		verify(mockAdapter, times(2)).execute(request);
+		verify(mockAdapter, times(2)).execute(any(PaymentRequest.class));
 	}
 
 	/**
@@ -266,7 +281,7 @@ class PaymentOrchestratorTest {
 				.waitDurationInOpenState(Duration.ofSeconds(1))
 				.build();
 		CircuitBreakerRegistry realCbRegistry = CircuitBreakerRegistry.of(cbConfig);
-		CircuitBreaker cb = realCbRegistry.circuitBreaker("MockPaymentGatewayAdapter");
+		CircuitBreaker cb = realCbRegistry.circuitBreaker("MockPSPAdapter");
 		// Manually open the circuit breaker to test wrapping order
 		cb.transitionToOpenState();
 		when(circuitBreakerRegistry.circuitBreaker(any())).thenReturn(cb);
@@ -290,8 +305,10 @@ class PaymentOrchestratorTest {
 		when(providerRouter.selectProvider(any(PaymentRequest.class))).thenReturn(Optional.of(mockAdapter));
 
 		// Circuit breaker is OPEN, so it should block immediately (before retry or adapter call)
-		assertThatThrownBy(() -> orchestrator.execute(request))
-				.isInstanceOf(CallNotPermittedException.class);
+		// Returns failure result instead of throwing exception
+		PaymentResult result = orchestrator.execute(request);
+		assertThat(result.getStatus()).isEqualTo(TransactionStatus.FAILED);
+		assertThat(result.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
 
 		// Verify adapter.execute was NEVER called (circuit breaker blocked before retry could execute)
 		verify(mockAdapter, times(0)).execute(request);

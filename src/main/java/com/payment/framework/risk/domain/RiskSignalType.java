@@ -14,6 +14,6 @@ public enum RiskSignalType {
     REPEATED_FAILURES,
     /** Compliance: pattern that may require reporting (e.g. structuring). */
     COMPLIANCE_ANOMALY,
-    /** Systemic: provider or gateway degradation. */
+    /** Systemic: provider or PSP degradation. */
     SYSTEMIC_RISK
 }

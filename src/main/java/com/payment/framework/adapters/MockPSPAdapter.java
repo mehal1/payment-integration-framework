@@ -1,6 +1,6 @@
 package com.payment.framework.adapters;
 
-import com.payment.framework.core.PaymentGatewayAdapter;
+import com.payment.framework.core.PSPAdapter;
 import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
@@ -14,14 +14,14 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Mock payment gateway adapter for integration testing and demos. Simulates success
+ * Mock PSP adapter for integration testing and demos. Simulates success
  * or failure based on a simple rule (e.g. amount threshold). In production,
- * replace with real adapters (Stripe, Adyen, etc.) implementing {@link PaymentGatewayAdapter}.
+ * replace with real adapters (Stripe, Adyen, etc.) implementing {@link PSPAdapter}.
  */
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "payment.adapters.mock.enabled", havingValue = "true", matchIfMissing = true)
-public class MockPaymentGatewayAdapter implements PaymentGatewayAdapter {
+public class MockPSPAdapter implements PSPAdapter {
 
     /** Simulate failure for amounts above this (e.g. for testing retries/circuit breaker). */
     private static final java.math.BigDecimal FAIL_AMOUNT_THRESHOLD = new java.math.BigDecimal("999999");
