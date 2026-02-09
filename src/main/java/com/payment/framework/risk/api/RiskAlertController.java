@@ -6,6 +6,7 @@ import com.payment.framework.risk.domain.RiskAlert;
 import com.payment.framework.risk.domain.TransactionWindowFeatures;
 import com.payment.framework.risk.engine.RiskEngine;
 import com.payment.framework.risk.features.TransactionWindowAggregator;
+import com.payment.framework.risk.messaging.WebhookService;
 import com.payment.framework.risk.store.RecentAlertsStore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,8 +15,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -45,6 +48,7 @@ public class RiskAlertController {
     private final RecentAlertsStore recentAlertsStore;
     private final RiskEngine riskEngine;
     private final TransactionWindowAggregator aggregator;
+    private final WebhookService webhookService;
 
     @GetMapping("/alerts")
     @Operation(summary = "List recent alerts", description = "Returns recently emitted risk alerts (in-memory; last 100)")
@@ -55,9 +59,12 @@ public class RiskAlertController {
     }
 
     @PostMapping("/demo/trigger")
-    @Operation(summary = "Generate demo alerts", description = "Injects synthetic failed payment events into the risk engine so you can see alerts without Kafka. Call this then GET /alerts.")
-    public ResponseEntity<Map<String, Object>> triggerDemoAlerts() {
-        String merchantRef = "demo-merchant-" + UUID.randomUUID().toString().substring(0, 8);
+    @Operation(summary = "Generate demo alerts", description = "Injects synthetic failed payment events into the risk engine so you can see alerts without Kafka. Call this then GET /alerts. Optional: ?merchantRef=your-merchant-id to use specific merchant.")
+    public ResponseEntity<Map<String, Object>> triggerDemoAlerts(
+            @RequestParam(required = false) String merchantRef) {
+        if (merchantRef == null || merchantRef.isEmpty()) {
+            merchantRef = "demo-merchant-" + UUID.randomUUID().toString().substring(0, 8);
+        }
         int alertsCreated = 0;
         log.info("Demo trigger: injecting 4 failed payment events for merchant {}", merchantRef);
         for (int i = 0; i < 4; i++) {
@@ -78,12 +85,10 @@ public class RiskAlertController {
                     .build();
             Optional<RiskAlert> alertOpt = riskEngine.evaluate(event);
             if (alertOpt.isPresent()) {
-                recentAlertsStore.add(alertOpt.get());
+                RiskAlert alert = alertOpt.get();
+                recentAlertsStore.add(alert);
+                webhookService.sendAlert(alert);
                 alertsCreated++;
-                log.info("Demo alert created: {} level={} score={}", 
-                        alertOpt.get().getAlertId(), alertOpt.get().getLevel(), alertOpt.get().getRiskScore());
-            } else {
-                log.debug("Demo event {} did not trigger an alert", i);
             }
         }
         int total = recentAlertsStore.getRecent(100).size();
@@ -149,6 +154,51 @@ public class RiskAlertController {
         headers.setContentType(MediaType.parseMediaType("text/csv"));
         headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=risk_training_data.csv");
         return ResponseEntity.ok().headers(headers).body(csv.toString());
+    }
+
+    @PostMapping("/webhooks")
+    @Operation(summary = "Register webhook URL", description = "Register a webhook URL to receive risk alerts for an entity (merchant/customer)")
+    public ResponseEntity<Map<String, Object>> registerWebhook(
+            @RequestBody Map<String, String> request) {
+        String entityId = request.get("entityId");
+        String webhookUrl = request.get("webhookUrl");
+        
+        if (entityId == null || webhookUrl == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Missing required fields: entityId, webhookUrl"
+            ));
+        }
+        
+        webhookService.registerWebhook(entityId, webhookUrl);
+        return ResponseEntity.ok(Map.of(
+                "message", "Webhook registered successfully",
+                "entityId", entityId,
+                "webhookUrl", webhookUrl
+        ));
+    }
+
+    @DeleteMapping("/webhooks")
+    @Operation(summary = "Unregister webhook URL", description = "Remove a webhook URL for an entity")
+    public ResponseEntity<Map<String, Object>> unregisterWebhook(
+            @RequestParam String entityId,
+            @RequestParam String webhookUrl) {
+        webhookService.unregisterWebhook(entityId, webhookUrl);
+        return ResponseEntity.ok(Map.of(
+                "message", "Webhook unregistered successfully",
+                "entityId", entityId,
+                "webhookUrl", webhookUrl
+        ));
+    }
+
+    @GetMapping("/webhooks")
+    @Operation(summary = "List webhook URLs", description = "Get all registered webhook URLs for an entity")
+    public ResponseEntity<Map<String, Object>> getWebhooks(
+            @RequestParam String entityId) {
+        List<String> webhooks = webhookService.getWebhooks(entityId);
+        return ResponseEntity.ok(Map.of(
+                "entityId", entityId,
+                "webhooks", webhooks
+        ));
     }
 
     private static String escapeCsv(String value) {

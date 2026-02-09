@@ -17,9 +17,8 @@ import org.springframework.stereotype.Component;
 import java.util.Optional;
 
 /**
- * Consumes payment lifecycle events from Project 1's topic. For each event,
- * updates feature aggregates and runs the risk engine; when risk is above
- * threshold, produces a risk alert (and optionally enriches with LLM summary).
+ * Consumes payment events from Kafka and evaluates them for fraud risk.
+ * When risk exceeds threshold, generates alerts and delivers them via Kafka, webhooks, and in-memory store.
  */
 @Slf4j
 @Component
@@ -31,6 +30,7 @@ public class PaymentEventConsumer {
     private final RiskAlertProducer alertProducer;
     private final AlertSummaryService alertSummaryService;
     private final RecentAlertsStore recentAlertsStore;
+    private final WebhookService webhookService;
 
     @KafkaListener(
             topics = "${payment.kafka.topic.payment-events:payment-events}",
@@ -48,17 +48,16 @@ public class PaymentEventConsumer {
                 return;
             }
             if (event.getEventId() == null) {
-                log.error("Received payment event with all null fields - deserialization issue! Key={}, partition={}, offset={}, event={}. " +
-                        "This suggests JSON format mismatch. Check producer/consumer ObjectMapper configuration.", 
-                        key, partition, offset, event);
+                log.error("Received payment event with null fields - deserialization issue. Key={}, partition={}, offset={}. " +
+                        "Check producer/consumer ObjectMapper configuration.", 
+                        key, partition, offset);
                 return;
             }
             log.info("Processing payment event: eventId={}, idempotencyKey={}, amount={}, eventType={}, merchantRef={}",
                     event.getEventId(), event.getIdempotencyKey(), event.getAmount(), event.getEventType(), event.getMerchantReference());
+            
             Optional<RiskAlert> alertOpt = riskEngine.evaluate(event);
-            if (alertOpt.isEmpty()) {
-                log.debug("No risk alert generated for eventId={} - risk score below threshold or no signals", event.getEventId());
-            }
+            
             if (alertOpt.isPresent()) {
                 RiskAlert alert = alertOpt.get();
                 Optional<String> explanation = alertSummaryService.generateSummary(alert);
@@ -80,6 +79,7 @@ public class PaymentEventConsumer {
                         .orElse(alert);
                 recentAlertsStore.add(enriched);
                 alertProducer.send(enriched);
+                webhookService.sendAlert(enriched);
                 log.info("Risk alert produced: {} level={} score={}", enriched.getAlertId(), enriched.getLevel(), enriched.getRiskScore());
             }
         } catch (Exception e) {

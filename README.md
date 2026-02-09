@@ -5,6 +5,13 @@ A framework for integrating emerging payment technologies into digital payment s
 
 Built on distributed systems architecture principles using Spring Boot, Kafka, Redis, and AWS, with intelligent ML-based risk detection capabilities.
 
+## What You'll Learn
+
+- How to design a pluggable PSP (Payment Service Provider) architecture
+- Implementing idempotency to prevent duplicate charges
+- Building resilient systems with circuit breakers and retry logic
+- Creating an event-driven architecture for audit and compliance
+
 ## Key Benefits
 
 - **Vendor Independence**: Not locked into a single PSP - easily switch or add new providers without rewriting code.
@@ -19,7 +26,7 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 ## Features
 
 ### Project 1: Payment Integration Framework
-- **Pluggable PSP Adapters**: Support for card, wallet, BNPL, crypto, and bank transfer PSPs (Stripe, Adyen, PayPal, etc.)
+- **Pluggable PSP Adapters**: Support for emerging payment types (card, wallet, BNPL, bank transfer) via PSPs like Stripe, Adyen, PayPal, Afterpay, Klarna, etc. Framework is extensible to support crypto and other emerging payment methods.
 - **Intelligent PSP Routing**: Multiple routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, Response Time-Based, Hybrid)
 - **Automatic Failover**: Automatically fails over to alternative PSPs when primary PSP fails
 - **PSP Performance Metrics**: Tracks success rate, latency, cost, and active connections per PSP
@@ -54,87 +61,13 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 
 ## Quick Start
 
-### Prerequisites
-- Java 17+
-- Docker Desktop (for Kafka and Redis)
-- Maven 3.6+
+For detailed local setup and testing instructions, see [LOCAL_TESTING.md](LOCAL_TESTING.md).
 
-### 1. Start Infrastructure
-
-```bash
-docker-compose up -d
-```
-
-This starts:
-- Kafka (port 9092)
-- Zookeeper (port 2181)
-- Redis (port 6379)
-
-### 2. Build and Run
-
-```bash
-./mvnw clean install
-./mvnw spring-boot:run
-```
-
-The application starts on `http://localhost:8080`
-
-### 3. Verify Health
-
-```bash
-curl http://localhost:8080/actuator/health
-```
-
-Expected response:
-```json
-{
-  "status": "UP",
-  "components": {
-    "kafka": {"status": "UP"},
-    "redis": {"status": "UP"},
-    "circuitBreakers": {"status": "UP"}
-  }
-}
-```
-
-### 4. Test Payment Execution
-
-```bash
-curl -X POST http://localhost:8080/api/v1/payments/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "idempotencyKey": "test-2",
-    "providerType": "MOCK",
-    "amount": 100.50,
-    "currencyCode": "USD",
-    "merchantReference": "order-123"
-  }'
-```
-
-### 5. View Risk Alerts
-
-**Option A: Trigger alerts** (via payment events - uses ML scoring if ML service is enabled, otherwise falls back to rule-based scoring):
-```bash
-# Trigger multiple failing payments quickly to trigger velocity alerts
-for i in 1 2 3 4 5; do
-  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-    -H "Content-Type: application/json" \
-    -d "{\"idempotencyKey\":\"risk-test-$i\",\"providerType\":\"MOCK\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"merchant-1\"}" > /dev/null
-done
-
-# Wait a few seconds for risk engine to process
-sleep 3
-
-# View alerts (check alert summary to see if ML or rules were used)
-curl http://localhost:8080/api/v1/risk/alerts?limit=10
-```
-
-**Option B: View via Swagger UI**:
-Open http://localhost:8080/swagger-ui/index.html and use the `/api/v1/risk/alerts` endpoint
-
-### 6. View API Documentation
-
-Open Swagger UI: http://localhost:8080/swagger-ui/index.html
+**Quick overview:**
+1. Start infrastructure: `docker-compose up -d`
+2. Build and run: `./mvnw spring-boot:run`
+3. Application available at `http://localhost:8080`
+4. API docs at `http://localhost:8080/swagger-ui/index.html`
 
 ## Architecture
 
@@ -169,68 +102,114 @@ Simple end-to-end flow from customer checkout to response:
 
 **Idempotency Guarantee**: Same `idempotencyKey` always returns same result, even across provider failovers.
 
-### System Architecture Diagram
+### Project 1: Payment Integration Architecture
 
 ```mermaid
 ---
 config:
   themeVariables:
-    fontSize: 24px
+    fontSize: 18px
     fontFamily: ''
     primaryTextColor: '#000000'
     lineColor: '#333333'
   layout: dagre
 ---
 graph LR
-    subgraph CL["Client Layer"]
-        Client[Client Applications]
+    subgraph ML["**Merchant Layer**"]
+        MerchantApps[**Merchant Applications**]
     end
 
-    subgraph PS["Payment Service"]
-        API[REST API]
-        Orchestrator[Payment Orchestrator]
-        Adapters[PSP Adapters<br/>StripeAdapter,<br/>AdyenAdapter]
+    subgraph PS["**Payment Service**"]
+        direction TB
+        API[**REST API**]
+        Orchestrator[**Payment Orchestrator**]
+        Router[**Provider Router**]
+        Adapters[**PSP Adapters**]
+        API --> Orchestrator
+        Orchestrator --> Router
+        Router --> Adapters
     end
 
-    subgraph RS["Risk Service"]
-        Consumer[Event Consumer]
-        Aggregator[Transaction Window<br/>Aggregator]
-        RiskEngine[Risk Engine]
-        MLScorer[ML Scorer]
+    subgraph DL["**Infrastructure**"]
+        Kafka[**Kafka**<br/>**Event Stream**]
+        Redis[**Redis**<br/>**Cache**]
     end
 
-    subgraph DL["Infrastructure"]
-        Kafka[Kafka<br/>Event Stream]
-        Redis[Redis<br/>Cache]
+    subgraph ES["**External Services**"]
+        PSPs[**PSPs**<br/>**Stripe, Adyen, PayPal**]
     end
 
-    subgraph ES["External Services"]
-        MLService[ML Service]
-        PSPs[PSPs<br/>Stripe, Adyen, PayPal]
-    end
-
-    Client -->|Payment Request| API
-    API --> Orchestrator
-    Orchestrator -->|Idempotency| Redis
-    Orchestrator --> Adapters
-    Adapters -->|API Calls| PSPs
-    Orchestrator -->|Publish Events| Kafka
-    
-    Kafka -->|Consume| Consumer
-    Consumer --> Aggregator
-    Aggregator --> RiskEngine
-    RiskEngine -->|ML Scoring| MLScorer
-    MLScorer -->|HTTP| MLService
-    RiskEngine -->|Publish Alerts| Kafka
-    Kafka -->|Alerts| API
-    API -->|Receive Alerts| Client
+    MerchantApps -->|**Payment Request**| API
+    Orchestrator <-->|**Idempotency**| Redis
+    Adapters <-->|**API Calls**| PSPs
+    Orchestrator -->|**Publish Events**| Kafka
+    API -->|**Response**| MerchantApps
 
     style API fill:#4A90E2
     style Orchestrator fill:#4A90E2
-    style RiskEngine fill:#F5A623
+    style Router fill:#4A90E2
     style Kafka fill:#FF6B6B
     style Redis fill:#4ECDC4
+    style PSPs fill:#95E1D3
+    style MerchantApps fill:#E8F4F8
+```
+
+### Project 2: Risk & Fraud Detection Architecture
+
+```mermaid
+---
+config:
+  themeVariables:
+    fontSize: 18px
+    fontFamily: ''
+    primaryTextColor: '#000000'
+    lineColor: '#333333'
+  layout: dagre
+---
+graph LR
+    subgraph ML["**Merchant Layer**"]
+        MerchantApps[**Merchant Applications**]
+        MerchantWebhooks[**Merchant**<br/>**Webhooks**]
+    end
+
+    subgraph RS["**Risk Service**"]
+        direction TB
+        Consumer[**Event Consumer**]
+        Aggregator[**Transaction Window**<br/>**Aggregator**]
+        RiskEngine[**Risk Engine**]
+        MLScorer[**ML Scorer**]
+        WebhookService[**Webhook Service**]
+        AlertAPI[**REST API**<br/>**/alerts**]
+        Consumer --> Aggregator
+        Aggregator --> RiskEngine
+        RiskEngine <--> MLScorer
+        Consumer --> WebhookService
+    end
+
+    subgraph DL["**Infrastructure**"]
+        Kafka[**Kafka**<br/>**Event Stream**]
+    end
+
+    subgraph ES["**External Services**"]
+        MLService[**ML Service**]
+    end
+
+    Kafka -->|**Payment Events**| Consumer
+    MLScorer <-->|**ML Scoring**| MLService
+    Consumer -->|**Alerts**| Kafka
+    WebhookService -->|**HTTP POST**| MerchantWebhooks
+    AlertAPI -->|**Query**| MerchantApps
+
+    style RiskEngine fill:#F5A623
+    style WebhookService fill:#F5A623
+    style Consumer fill:#F5A623
+    style Aggregator fill:#F5A623
+    style MLScorer fill:#F5A623
+    style AlertAPI fill:#F5A623
+    style Kafka fill:#FF6B6B
     style MLService fill:#50E3C2
+    style MerchantWebhooks fill:#95E1D3
+    style MerchantApps fill:#E8F4F8
 ```
 
 ### Key Components
@@ -243,10 +222,19 @@ graph LR
 - **PaymentEventProducer**: Publishes payment lifecycle events to Kafka 
 - **RiskEngine**: Evaluates payment events using rules and optional ML scoring, also detects cross-PSP fraud patterns
 - **TransactionWindowAggregator**: Aggregates transaction features across all PSPs by entity (merchant/customer) for risk scoring
+- **WebhookService**: Delivers risk alerts to merchant webhook endpoints in real-time with retry logic and async delivery
 
-**Note on Terminology:**
-- **PSP Adapters** = Your code classes (`StripeAdapter`, `AdyenAdapter`) that wrap external PSPs
-- **PSP** (Payment Service Provider) = External services (Stripe, Adyen, PayPal) - industry-standard term for payment processing services
+## Terminology
+
+| Term | Definition | Example |
+|------|------------|---------|
+| **Merchant** | Business accepting payments | E-commerce site, mobile app, etc |
+| **Merchant Applications** | Merchant's software integrating with framework | Checkout page, mobile app backend, etc |
+| **Merchant Webhooks** | Merchant's HTTP endpoints for real-time alerts | `https://merchant.com/webhooks/alerts` |
+| **PSP** | External payment service | Stripe, Adyen, PayPal, Afterpay (BNPL), etc. |
+| **PSPAdapter** | Framework code class wrapping PSP API | `StripeAdapter.java`, `AdyenAdapter.java`, etc |
+| **Payment Types** | Payment methods supported | Card, Wallet, BNPL, Bank Transfer (Crypto supportable via extensible adapter pattern) |
+| **Entity ID** | Identifier for grouping transactions (merchant/customer) | `merchant-123`, `customer-abc` |
 
 ## Configuration
 
@@ -268,138 +256,12 @@ See `src/main/resources/application.yaml` for complete configuration.
 
 ## Testing
 
+For comprehensive testing instructions including unit tests, integration tests, manual testing scenarios, and webhook testing, see [LOCAL_TESTING.md](LOCAL_TESTING.md).
 
-### Project 1: Payment Integration Framework Tests
-
-#### Unit Tests (No Docker Required)
-
-```bash
-# Run all unit tests
-./mvnw test
-
-# Run specific Project 1 tests
-./mvnw test -Dtest=PaymentControllerTest
-```
-
-**Coverage:**
-- `PaymentController` - REST API endpoints, validation, response format
-- `PaymentOrchestrator` - PSP adapter routing, idempotency, circuit breakers
-- `IdempotencyService` - Redis operations (mocked)
-
-### Project 2: Risk & Fraud Detection Tests
-
-#### Unit Tests (No Docker Required)
-
-```bash
-# Run all unit tests
-./mvnw test
-
-# Run specific tests
-./mvnw test -Dtest=RiskEngineTest
-```
-
-
-#### Manual Testing: Risk Scenarios
-
-**Test 1: High Velocity Alert** (Multiple transactions in short time)
-```bash
-# Trigger 10+ payments in quick succession
-for i in {1..12}; do
-  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-    -H "Content-Type: application/json" \
-    -d "{\"idempotencyKey\":\"velocity-test-$i\",\"providerType\":\"MOCK\",\"amount\":100,\"currencyCode\":\"USD\",\"merchantReference\":\"merchant-1\"}" > /dev/null
-done
-
-# Wait for risk engine to process
-sleep 3
-
-# Check for alerts
-curl http://localhost:8080/api/v1/risk/alerts?limit=10
-```
-
-**Test 2: High Failure Rate Alert** (Multiple failures)
-```bash
-# Trigger multiple failing payments (amount >= 999999 triggers failure in MockPSPAdapter)
-for i in {1..5}; do
-  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-    -H "Content-Type: application/json" \
-    -d "{\"idempotencyKey\":\"failure-test-$i\",\"providerType\":\"MOCK\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"merchant-2\"}" > /dev/null
-done
-
-sleep 3
-curl http://localhost:8080/api/v1/risk/alerts?limit=10
-```
-
-**Test 3: Unusual Amount Alert** (Amount significantly higher than average)
-```bash
-# First, establish a baseline with normal amounts
-for i in {1..5}; do
-  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-    -H "Content-Type: application/json" \
-    -d "{\"idempotencyKey\":\"baseline-$i\",\"providerType\":\"MOCK\",\"amount\":100,\"currencyCode\":\"USD\",\"merchantReference\":\"merchant-3\"}" > /dev/null
-done
-
-# Then trigger an unusually high amount (2x+ average)
-curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-  -H "Content-Type: application/json" \
-  -d '{"idempotencyKey":"unusual-amount","providerType":"MOCK","amount":500,"currencyCode":"USD","merchantReference":"merchant-3"}'
-
-sleep 3
-curl http://localhost:8080/api/v1/risk/alerts?limit=10
-```
-
-**Test 4: Cross-PSP Fraud Detection** (Distributed failure pattern)
-```bash
-# Simulate fraudster trying multiple PSPs (in real scenario, these would be different PSPs)
-# All events are aggregated by merchantReference, detecting cross-PSP patterns
-merchant="cross-psp-fraud-123"
-
-# Simulate failures across "different PSPs" (using same MOCK provider for demo)
-for i in {1..3}; do
-  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-    -H "Content-Type: application/json" \
-    -d "{\"idempotencyKey\":\"psp1-fail-$i\",\"providerType\":\"MOCK\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\"}" > /dev/null
-done
-
-for i in {1..2}; do
-  curl -s -X POST http://localhost:8080/api/v1/payments/execute \
-    -H "Content-Type: application/json" \
-    -d "{\"idempotencyKey\":\"psp2-fail-$i\",\"providerType\":\"MOCK\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\"}" > /dev/null
-done
-
-sleep 3
-curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0] | {entityId, failureRate, riskScore, signalTypes}'
-# Should show aggregated failure rate across all "PSPs" for the merchant
-```
-
-**Test 5: ML Integration** (If ML service is running)
-```bash
-# Ensure ML service is running on port 5001
-# Check if ML scoring is enabled in application.yaml:
-# payment.risk.ml.enabled: true
-
-# Trigger payments and check if alerts show "ML" in summary
-curl -X POST http://localhost:8080/api/v1/payments/execute \
-  -H "Content-Type: application/json" \
-  -d '{"idempotencyKey":"ml-test","providerType":"MOCK","amount":999999,"currencyCode":"USD","merchantReference":"merchant-1"}'
-
-sleep 3
-curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0].summary'
-# Should show "ML" in summary if ML service responded
-```
-
-### Integration Tests (Docker Required)
-
-```bash
-# Ensure Docker is running
-./mvnw test -DincludeTags=integration
-```
-
-**What it tests:**
-- Payment execution API endpoint
-- Redis idempotency with Testcontainers Redis instance
-- Risk alerts API endpoint
-- Uses Embedded Kafka for event infrastructure (full Kafka → risk evaluation flow not verified in this test)
+**Quick test commands:**
+- Run all tests: `./mvnw test`
+- Run integration tests: `./mvnw test -DincludeTags=integration`
+- Test webhooks: `./test-webhook.sh`
 
 ## Adding a New PSP
 
@@ -465,8 +327,6 @@ curl http://localhost:8080/api/v1/routing/metrics
 # Get metrics for specific provider
 curl http://localhost:8080/api/v1/routing/metrics/CARD
 ```
-
-
 
 ## ML Integration
 

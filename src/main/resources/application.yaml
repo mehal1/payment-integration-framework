@@ -38,6 +38,12 @@ payment:
       service:
         url: http://localhost:5001/predict  # Match your ML service port
         timeout: 2000  # milliseconds
+    # Webhook delivery (optional)
+    webhook:
+      enabled: true  # Set to true to enable webhook delivery
+      max-retries: 3  # Maximum retry attempts for failed webhook calls
+      retry-delay-ms: 1000  # Initial retry delay (exponential backoff)
+      timeout-ms: 5000  # Webhook HTTP request timeout
   # Provider routing and failover
   routing:
     strategy: WeightedRoundRobin  # Options: WeightedRoundRobin, LeastConnections, CostBased, ResponseTimeBased
