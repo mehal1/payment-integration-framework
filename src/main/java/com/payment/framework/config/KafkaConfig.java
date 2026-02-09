@@ -6,6 +6,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.payment.framework.messaging.PaymentEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.Serializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -13,7 +14,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.kafka.support.serializer.JsonSerializer;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -47,15 +47,19 @@ public class KafkaConfig {
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.RETRIES_CONFIG, 3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        JsonSerializer<PaymentEvent> serializer = new JsonSerializer<PaymentEvent>(objectMapper) {
+        
+        // Custom serializer using ObjectMapper directly (replaces deprecated JsonSerializer)
+        Serializer<PaymentEvent> serializer = new Serializer<PaymentEvent>() {
             @Override
             public byte[] serialize(String topic, PaymentEvent data) {
+                if (data == null) {
+                    return null;
+                }
                 try {
-                    byte[] result = super.serialize(topic, data);
+                    byte[] result = objectMapper.writeValueAsBytes(data);
                     if (result != null) {
                         String json = new String(result);
                         log.info("Serialized PaymentEvent to JSON (topic={}, length={}): {}", topic, result.length, json);
@@ -63,11 +67,10 @@ public class KafkaConfig {
                     return result;
                 } catch (Exception e) {
                     log.error("Serialization failed for topic={}", topic, e);
-                    throw e;
+                    throw new RuntimeException("Failed to serialize PaymentEvent", e);
                 }
             }
         };
-        serializer.setAddTypeInfo(false); // Don't add type headers - consumer uses explicit class
         return new DefaultKafkaProducerFactory<>(props, new StringSerializer(), serializer);
     }
 

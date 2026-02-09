@@ -160,7 +160,7 @@ graph LR
 ---
 config:
   themeVariables:
-    fontSize: 18px
+    fontSize: 14px
     fontFamily: ''
     primaryTextColor: '#000000'
     lineColor: '#333333'
@@ -198,7 +198,7 @@ graph LR
     MLScorer <-->|**ML Scoring**| MLService
     Consumer -->|**Alerts**| Kafka
     WebhookService -->|**HTTP POST**| MerchantWebhooks
-    AlertAPI -->|**Query**| MerchantApps
+    AlertAPI -->|**Query Alerts**| MerchantApps
 
     style RiskEngine fill:#F5A623
     style WebhookService fill:#F5A623
