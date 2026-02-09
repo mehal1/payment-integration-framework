@@ -1,9 +1,9 @@
 # Payment Integration Framework
 
-A framework for integrating emerging payment technologies into digital payment systems. This framework standardizes integration patterns to reduce transaction failures, accelerate safe adoption of new payment methods, and mitigate operational and compliance risks. Includes intelligent gateway routing, automatic failover, unified fraud detection (single-PSP and cross-PSP), ML-based risk scoring, and audit trails.
+A payment orchestration framework that helps merchants process payments across multiple payment providers (Stripe, Adyen, PayPal, etc.) with intelligent routing based on cost, performance, and success rates. Automatically switches to backup providers if one fails, and detects fraud by aggregating patterns across all providers—catching distributed attacks that individual providers miss. Built with Spring Boot, Kafka, and Redis for scalability and compliance.
 
 
-Built on distributed systems architecture principles using Spring Boot, Kafka, Redis, and AWS, with intelligent ML-based risk detection capabilities.
+Built on distributed systems architecture principles using Spring Boot, Kafka, Redis with intelligent ML-based risk detection capabilities.
 
 ## What You'll Learn
 
@@ -108,10 +108,12 @@ Simple end-to-end flow from customer checkout to response:
 ---
 config:
   themeVariables:
-    fontSize: 18px
+    fontSize: 24px
     fontFamily: ''
     primaryTextColor: '#000000'
     lineColor: '#333333'
+    primaryBorderColor: '#333333'
+    subgraphPadding: 50
   layout: dagre
 ---
 graph LR
@@ -119,15 +121,13 @@ graph LR
         MerchantApps[**Merchant Applications**]
     end
 
-    subgraph PS["**Payment Service**"]
+    subgraph PS[" "]
         direction TB
+        PSLabel["**Payment Service**"]
         API[**REST API**]
         Orchestrator[**Payment Orchestrator**]
         Router[**Provider Router**]
         Adapters[**PSP Adapters**]
-        API --> Orchestrator
-        Orchestrator --> Router
-        Router --> Adapters
     end
 
     subgraph DL["**Infrastructure**"]
@@ -135,15 +135,23 @@ graph LR
         Redis[**Redis**<br/>**Cache**]
     end
 
+    subgraph RS["**Risk Service**"]
+        RiskEngine[**Risk Engine**]
+    end
+
     subgraph ES["**External Services**"]
         PSPs[**PSPs**<br/>**Stripe, Adyen, PayPal**]
     end
 
-    MerchantApps -->|**Payment Request**| API
-    Orchestrator <-->|**Idempotency**| Redis
-    Adapters <-->|**API Calls**| PSPs
-    Orchestrator -->|**Publish Events**| Kafka
-    API -->|**Response**| MerchantApps
+    MerchantApps -->|**1. Payment Request**| API
+    API -->|**2.**| Orchestrator
+    Orchestrator <-->|**3. Idempotency**| Redis
+    Orchestrator -->|**4.**| Router
+    Router -->|**5.**| Adapters
+    Adapters <-->|**6. API Calls**| PSPs
+    Orchestrator -->|**7. Publish Events**| Kafka
+    Kafka -->|**9. Events**| RiskEngine
+    API -->|**8. Response**| MerchantApps
 
     style API fill:#4A90E2
     style Orchestrator fill:#4A90E2
@@ -152,6 +160,8 @@ graph LR
     style Redis fill:#4ECDC4
     style PSPs fill:#95E1D3
     style MerchantApps fill:#E8F4F8
+    style PSLabel fill:transparent,stroke:transparent,color:#000000
+    style RiskEngine fill:#F5A623
 ```
 
 ### Project 2: Risk & Fraud Detection Architecture
@@ -160,56 +170,52 @@ graph LR
 ---
 config:
   themeVariables:
-    fontSize: 14px
+    fontSize: 24px
     fontFamily: ''
     primaryTextColor: '#000000'
     lineColor: '#333333'
   layout: dagre
 ---
-graph LR
-    subgraph ML["**Merchant Layer**"]
-        MerchantApps[**Merchant Applications**]
-        MerchantWebhooks[**Merchant**<br/>**Webhooks**]
-    end
+flowchart LR
+ subgraph ML["**Merchant Layer**"]
+        MerchantApps["**Merchant Applications**"]
+        MerchantWebhooks["**Merchant**<br>**Webhooks**"]
+  end
+ subgraph RS["**Risk Service**"]
+    direction TB
+        Consumer["**Event Consumer**"]
+        Aggregator["**Transaction Window**<br>**Aggregator**"]
+        RiskEngine["**Risk Engine**"]
+        MLScorer["**ML Scorer**"]
+        WebhookService["**Webhook Service**"]
+        AlertAPI["**REST API**<br>**/alerts**"]
+  end
+ subgraph DL["**Infrastructure**"]
+        Kafka["**Kafka**<br>**Event Stream**"]
+  end
+ subgraph ES["**<small>External Services</small>**"]
+        MLService["**ML Service**"]
+  end
+    Kafka -- "**1. Payment Events**" --> Consumer
+    Consumer -- "**2.**" --> Aggregator
+    Aggregator -- "**3.**" --> RiskEngine
+    RiskEngine <-- "**4. ML Scoring**" --> MLScorer
+    MLScorer <-- "**5.**" --> MLService
+    Consumer -- "**6. Alerts**" --> Kafka
+    Consumer -- "**7.**" --> WebhookService
+    WebhookService -- "**8. HTTP POST**" --> MerchantWebhooks
+    AlertAPI -- "**9. Query Alerts**" --> MerchantApps
 
-    subgraph RS["**Risk Service**"]
-        direction TB
-        Consumer[**Event Consumer**]
-        Aggregator[**Transaction Window**<br/>**Aggregator**]
-        RiskEngine[**Risk Engine**]
-        MLScorer[**ML Scorer**]
-        WebhookService[**Webhook Service**]
-        AlertAPI[**REST API**<br/>**/alerts**]
-        Consumer --> Aggregator
-        Aggregator --> RiskEngine
-        RiskEngine <--> MLScorer
-        Consumer --> WebhookService
-    end
-
-    subgraph DL["**Infrastructure**"]
-        Kafka[**Kafka**<br/>**Event Stream**]
-    end
-
-    subgraph ES["**External Services**"]
-        MLService[**ML Service**]
-    end
-
-    Kafka -->|**Payment Events**| Consumer
-    MLScorer <-->|**ML Scoring**| MLService
-    Consumer -->|**Alerts**| Kafka
-    WebhookService -->|**HTTP POST**| MerchantWebhooks
-    AlertAPI -->|**Query Alerts**| MerchantApps
-
-    style RiskEngine fill:#F5A623
-    style WebhookService fill:#F5A623
+    style MerchantApps fill:#E8F4F8
+    style MerchantWebhooks fill:#95E1D3
     style Consumer fill:#F5A623
     style Aggregator fill:#F5A623
+    style RiskEngine fill:#F5A623
     style MLScorer fill:#F5A623
+    style WebhookService fill:#F5A623
     style AlertAPI fill:#F5A623
     style Kafka fill:#FF6B6B
     style MLService fill:#50E3C2
-    style MerchantWebhooks fill:#95E1D3
-    style MerchantApps fill:#E8F4F8
 ```
 
 ### Key Components
