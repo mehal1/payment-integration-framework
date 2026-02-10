@@ -1,5 +1,6 @@
 package com.payment.framework.messaging;
 
+import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.TransactionStatus;
 import lombok.Builder;
 import lombok.Value;
@@ -19,7 +20,7 @@ public class PaymentEvent {
     String eventId;
     String idempotencyKey;
     String correlationId;
-    String providerType;
+    PaymentProviderType providerType;
     String providerTransactionId;
     TransactionStatus status;
     BigDecimal amount;
@@ -27,6 +28,7 @@ public class PaymentEvent {
     String failureCode;
     String message;
     String merchantReference;
+    String customerId;
     Instant timestamp;
     String eventType;
 }

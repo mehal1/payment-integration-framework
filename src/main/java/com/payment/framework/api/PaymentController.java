@@ -4,6 +4,7 @@ import com.payment.framework.core.PaymentOrchestrator;
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
 import com.payment.framework.messaging.PaymentEventProducer;
+import com.payment.framework.persistence.service.PaymentPersistenceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -28,6 +29,7 @@ public class PaymentController {
 
     private final PaymentOrchestrator orchestrator;
     private final PaymentEventProducer eventProducer;
+    private final PaymentPersistenceService persistenceService;
 
     @PostMapping("/execute")
     @Operation(summary = "Execute payment", description = "Submit a payment. Use idempotencyKey for safe retries.")
@@ -54,6 +56,9 @@ public class PaymentController {
         
         log.debug("Payment execution completed: idempotencyKey={}, status={}, providerTransactionId={}", 
                 result.getIdempotencyKey(), result.getStatus(), result.getProviderTransactionId());
+        
+        // Persist transaction to database
+        persistenceService.persistTransaction(request, result);
         
         eventProducer.publishResult(request, result);
 

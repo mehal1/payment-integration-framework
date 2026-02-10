@@ -2,7 +2,6 @@ package com.payment.framework.messaging;
 
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
-import com.payment.framework.domain.TransactionStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,7 +32,7 @@ public class PaymentEventProducer {
                 .eventId(UUID.randomUUID().toString())
                 .idempotencyKey(request.getIdempotencyKey())
                 .correlationId(request.getCorrelationId())
-                .providerType(request.getProviderType().name())
+                .providerType(request.getProviderType())
                 .providerTransactionId(null)
                 .status(null)
                 .amount(request.getAmount())
@@ -41,6 +40,7 @@ public class PaymentEventProducer {
                 .failureCode(null)
                 .message(null)
                 .merchantReference(request.getMerchantReference())
+                .customerId(request.getCustomerId())
                 .timestamp(Instant.now())
                 .eventType("PAYMENT_REQUESTED")
                 .build();
@@ -66,7 +66,7 @@ public class PaymentEventProducer {
                 .eventId(UUID.randomUUID().toString())
                 .idempotencyKey(result.getIdempotencyKey())
                 .correlationId(request.getCorrelationId())
-                .providerType(request.getProviderType().name())
+                .providerType(request.getProviderType())
                 .providerTransactionId(result.getProviderTransactionId())
                 .status(result.getStatus())
                 .amount(result.getAmount())
@@ -74,6 +74,7 @@ public class PaymentEventProducer {
                 .failureCode(result.getFailureCode())
                 .message(result.getMessage())
                 .merchantReference(request.getMerchantReference())
+                .customerId(request.getCustomerId())
                 .timestamp(result.getTimestamp())
                 .eventType(eventType)
                 .build();

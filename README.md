@@ -55,6 +55,9 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 | Language | Java 17 |
 | Message Broker | Apache Kafka |
 | Cache | Redis |
+| Database | PostgreSQL 15 |
+| ORM | JPA/Hibernate |
+| Migration | Flyway |
 | Resilience | Resilience4j |
 | Testing | JUnit 5, Mockito, Testcontainers |
 | API Docs | Swagger/OpenAPI 3 |
@@ -133,6 +136,7 @@ graph LR
     subgraph DL["**Infrastructure**"]
         Kafka[**Kafka**<br/>**Event Stream**]
         Redis[**Redis**<br/>**Cache**]
+        PostgreSQL[**PostgreSQL**<br/>**Database**]
     end
 
     subgraph RS["**Risk Service**"]
@@ -150,7 +154,9 @@ graph LR
     Router -->|**5.**| Adapters
     Adapters <-->|**6. API Calls**| PSPs
     Orchestrator -->|**7. Publish Events**| Kafka
+    Orchestrator -->|**10. Persist Transaction**| PostgreSQL
     Kafka -->|**9. Events**| RiskEngine
+    Kafka -->|**11. Persist Events**| PostgreSQL
     API -->|**8. Response**| MerchantApps
 
     style API fill:#4A90E2
@@ -158,6 +164,7 @@ graph LR
     style Router fill:#4A90E2
     style Kafka fill:#FF6B6B
     style Redis fill:#4ECDC4
+    style PostgreSQL fill:#336791
     style PSPs fill:#95E1D3
     style MerchantApps fill:#E8F4F8
     style PSLabel fill:transparent,stroke:transparent,color:#000000
@@ -192,6 +199,7 @@ flowchart LR
   end
  subgraph DL["**Infrastructure**"]
         Kafka["**Kafka**<br>**Event Stream**"]
+        PostgreSQL["**PostgreSQL**<br>**Database**"]
   end
  subgraph ES["**<small>External Services</small>**"]
         MLService["**ML Service**"]
@@ -203,6 +211,8 @@ flowchart LR
     MLScorer <-- "**5.**" --> MLService
     Consumer -- "**6. Alerts**" --> Kafka
     Consumer -- "**7.**" --> WebhookService
+    Consumer -- "**10. Persist Events**" --> PostgreSQL
+    Consumer -- "**11. Persist Alerts**" --> PostgreSQL
     WebhookService -- "**8. HTTP POST**" --> MerchantWebhooks
     AlertAPI -- "**9. Query Alerts**" --> MerchantApps
 
@@ -215,7 +225,92 @@ flowchart LR
     style WebhookService fill:#F5A623
     style AlertAPI fill:#F5A623
     style Kafka fill:#FF6B6B
+    style PostgreSQL fill:#336791
     style MLService fill:#50E3C2
+```
+
+### Database Schema
+
+The framework uses PostgreSQL for persistent storage of payment transactions, events, and risk alerts. The database schema is managed via Flyway migrations.
+
+```mermaid
+---
+config:
+  themeVariables:
+    fontSize: 34px
+    fontFamily: ''
+    primaryTextColor: '#000000'
+    lineColor: '#333333'
+  layout: er
+---
+erDiagram
+    payment_transactions ||--o{ payment_events : "has"
+    risk_alerts ||--o{ risk_alert_signals : "has"
+    risk_alerts ||--o{ risk_alert_related_events : "references"
+    payment_events ||--o{ risk_alert_related_events : "referenced_by"
+
+    payment_transactions {
+        string idempotency_key PK
+        string transaction_id UK
+        string merchant_reference
+        string customer_id
+        numeric amount
+        string currency_code
+        enum provider_type
+        string provider_transaction_id
+        enum status
+        string failure_code
+        string failure_message
+        string correlation_id
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    payment_events {
+        string event_id PK
+        string idempotency_key FK
+        string correlation_id
+        string event_type
+        string provider_type
+        string provider_transaction_id
+        enum status
+        numeric amount
+        string currency_code
+        string failure_code
+        string message
+        string merchant_reference
+        string customer_id
+        timestamp timestamp
+        timestamp created_at
+    }
+
+    risk_alerts {
+        string alert_id PK
+        string entity_id
+        string entity_type
+        enum risk_level
+        double risk_score
+        numeric amount
+        string currency_code
+        string summary
+        text detailed_explanation
+        enum status
+        string assigned_to
+        text resolution_notes
+        timestamp created_at
+        timestamp updated_at
+        timestamp resolved_at
+    }
+
+    risk_alert_signals {
+        string alert_id PK,FK
+        enum signal_type PK
+    }
+
+    risk_alert_related_events {
+        string alert_id PK,FK
+        string event_id PK,FK
+    }
 ```
 
 ### Key Components
@@ -226,6 +321,7 @@ flowchart LR
 - **PSP Adapters** (e.g., `StripeAdapter`, `AdyenAdapter`): Code adapters that wrap external PSP APIs (Stripe, Adyen, PayPal) and convert between framework format and PSP-specific formats
 - **IdempotencyService**: Redis-backed cache to prevent duplicate processing
 - **PaymentEventProducer**: Publishes payment lifecycle events to Kafka 
+- **PaymentPersistenceService**: Persists payment transactions and events to PostgreSQL for compliance and audit
 - **RiskEngine**: Evaluates payment events using rules and optional ML scoring, also detects cross-PSP fraud patterns
 - **TransactionWindowAggregator**: Aggregates transaction features across all PSPs by entity (merchant/customer) for risk scoring
 - **WebhookService**: Delivers risk alerts to merchant webhook endpoints in real-time with retry logic and async delivery
@@ -251,6 +347,11 @@ Key configuration properties in `application.yaml`:
 | `spring.kafka.bootstrap-servers` | `localhost:9092` | Kafka broker address |
 | `spring.data.redis.host` | `localhost` | Redis host |
 | `spring.data.redis.port` | `6379` | Redis port |
+| `spring.datasource.url` | `jdbc:postgresql://localhost:5432/payment_framework` | PostgreSQL database URL |
+| `spring.datasource.username` | `postgres` | Database username |
+| `spring.datasource.password` | `postgres` | Database password |
+| `spring.flyway.enabled` | `true` | Enable Flyway migrations |
+| `spring.flyway.locations` | `classpath:db/migration` | Migration scripts location |
 | `payment.risk.engine.enabled` | `true` | Enable risk engine |
 | `payment.risk.ml.enabled` | `true` | Enable ML scoring |
 | `payment.risk.ml.service.url` | `http://localhost:5001/predict` | ML service endpoint |
@@ -333,6 +434,12 @@ curl http://localhost:8080/api/v1/routing/metrics
 # Get metrics for specific provider
 curl http://localhost:8080/api/v1/routing/metrics/CARD
 ```
+
+## Database Persistence
+
+The framework uses PostgreSQL for persistent storage of payment transactions, events, and risk alerts. All database operations are handled automatically via Flyway migrations and JPA entities.
+
+For detailed database setup, schema documentation, querying examples, and troubleshooting, see [POSTGRES_SETUP.md](POSTGRES_SETUP.md).
 
 ## ML Integration
 

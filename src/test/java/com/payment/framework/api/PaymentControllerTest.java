@@ -5,6 +5,7 @@ import com.payment.framework.domain.PaymentResult;
 import com.payment.framework.domain.TransactionStatus;
 import com.payment.framework.core.PaymentOrchestrator;
 import com.payment.framework.messaging.PaymentEventProducer;
+import com.payment.framework.persistence.service.PaymentPersistenceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -35,6 +36,9 @@ class PaymentControllerTest {
 
     @MockitoBean
     private PaymentEventProducer eventProducer;
+
+    @MockitoBean
+    private PaymentPersistenceService persistenceService;
 
     @Test
     void executeReturnsOkAndResultFromOrchestrator() throws Exception {

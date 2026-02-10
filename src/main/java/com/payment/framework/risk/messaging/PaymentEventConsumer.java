@@ -1,6 +1,8 @@
 package com.payment.framework.risk.messaging;
 
 import com.payment.framework.messaging.PaymentEvent;
+import com.payment.framework.persistence.service.PaymentPersistenceService;
+import com.payment.framework.persistence.service.RiskAlertPersistenceService;
 import com.payment.framework.risk.domain.RiskAlert;
 import com.payment.framework.risk.engine.RiskEngine;
 import com.payment.framework.risk.llm.AlertSummaryService;
@@ -31,6 +33,8 @@ public class PaymentEventConsumer {
     private final AlertSummaryService alertSummaryService;
     private final RecentAlertsStore recentAlertsStore;
     private final WebhookService webhookService;
+    private final PaymentPersistenceService persistenceService;
+    private final RiskAlertPersistenceService alertPersistenceService;
 
     @KafkaListener(
             topics = "${payment.kafka.topic.payment-events:payment-events}",
@@ -56,6 +60,9 @@ public class PaymentEventConsumer {
             log.info("Processing payment event: eventId={}, idempotencyKey={}, amount={}, eventType={}, merchantRef={}",
                     event.getEventId(), event.getIdempotencyKey(), event.getAmount(), event.getEventType(), event.getMerchantReference());
             
+            // Persist event to database for audit trail
+            persistenceService.persistEvent(event);
+            
             Optional<RiskAlert> alertOpt = riskEngine.evaluate(event);
             
             if (alertOpt.isPresent()) {
@@ -80,6 +87,8 @@ public class PaymentEventConsumer {
                 recentAlertsStore.add(enriched);
                 alertProducer.send(enriched);
                 webhookService.sendAlert(enriched);
+                // Persist alert to database
+                alertPersistenceService.persistAlert(enriched);
                 log.info("Risk alert produced: {} level={} score={}", enriched.getAlertId(), enriched.getLevel(), enriched.getRiskScore());
             }
         } catch (Exception e) {

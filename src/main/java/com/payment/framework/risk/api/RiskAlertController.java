@@ -1,5 +1,6 @@
 package com.payment.framework.risk.api;
 
+import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.TransactionStatus;
 import com.payment.framework.messaging.PaymentEvent;
 import com.payment.framework.risk.domain.RiskAlert;
@@ -72,7 +73,7 @@ public class RiskAlertController {
                     .eventId(UUID.randomUUID().toString())
                     .idempotencyKey("demo-" + i)
                     .correlationId("demo-correlation")
-                    .providerType("MOCK")
+                    .providerType(PaymentProviderType.MOCK)
                     .providerTransactionId(null)
                     .status(TransactionStatus.FAILED)
                     .amount(BigDecimal.valueOf(50 + i * 10))
@@ -122,7 +123,7 @@ public class RiskAlertController {
                         .eventId(UUID.randomUUID().toString())
                         .idempotencyKey(entityId + "-" + j)
                         .correlationId("training")
-                        .providerType("MOCK")
+                        .providerType(PaymentProviderType.MOCK)
                         .providerTransactionId(null)
                         .status(failed ? TransactionStatus.FAILED : TransactionStatus.SUCCESS)
                         .amount(BigDecimal.valueOf(10 + rnd.nextInt(500)))

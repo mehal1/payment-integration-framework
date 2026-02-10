@@ -4,6 +4,7 @@ import com.payment.framework.risk.domain.RiskAlert;
 import com.payment.framework.risk.domain.RiskLevel;
 import com.payment.framework.risk.engine.RiskEngine;
 import com.payment.framework.risk.features.TransactionWindowAggregator;
+import com.payment.framework.risk.messaging.WebhookService;
 import com.payment.framework.risk.store.RecentAlertsStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +41,9 @@ class RiskAlertControllerTest {
 
     @MockitoBean
     private TransactionWindowAggregator transactionWindowAggregator;
+
+    @MockitoBean
+    private WebhookService webhookService;
 
     @Test
     void listAlertsReturnsOkAndArray() throws Exception {
