@@ -136,7 +136,7 @@ graph LR
     subgraph DL["**Infrastructure**"]
         Kafka[**Kafka**<br/>**Event Stream**]
         Redis[**Redis**<br/>**Cache**]
-        PostgreSQL[**PostgreSQL**<br/>**Database**]
+        PostgreSQL[**PostgreSQL**]
     end
 
     subgraph RS["**Risk Service**"]
@@ -199,7 +199,7 @@ flowchart LR
   end
  subgraph DL["**Infrastructure**"]
         Kafka["**Kafka**<br>**Event Stream**"]
-        PostgreSQL["**PostgreSQL**<br>**Database**"]
+        PostgreSQL["**PostgreSQL**"]
   end
  subgraph ES["**<small>External Services</small>**"]
         MLService["**ML Service**"]
