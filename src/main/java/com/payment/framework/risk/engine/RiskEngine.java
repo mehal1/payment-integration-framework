@@ -216,12 +216,10 @@ public class RiskEngine {
             }
         }
 
-        // Card testing pattern detection (for ML scoring - signals only)
         if (features.getTotalCount() >= 3 && features.getIncreasingAmountCount() >= 2 && features.getAmountTrend() > 0) {
             signals.add(RiskSignalType.COMPLIANCE_ANOMALY);
         }
 
-        // Rapid-fire transaction detection (for ML scoring - signals only)
         if (features.getTotalCount() >= 3 && features.getSecondsSinceLastTransaction() > 0 
                 && features.getSecondsSinceLastTransaction() < 5 && features.getAvgTimeGapSeconds() < 3) {
             signals.add(RiskSignalType.HIGH_VELOCITY);

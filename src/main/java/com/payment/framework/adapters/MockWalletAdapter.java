@@ -24,9 +24,7 @@ import java.util.UUID;
 public class MockWalletAdapter implements PSPAdapter {
 
     private static final BigDecimal FAIL_AMOUNT_THRESHOLD = new BigDecimal("777777");
-    /** Simulated DPAN BIN (wallet token); differs from physical card BIN. */
     private static final String MOCK_DPAN_BIN = "555555";
-    /** Simulated DPAN last4 (wallet token last4). */
     private static final String MOCK_DPAN_LAST4 = "4321";
 
     @Override

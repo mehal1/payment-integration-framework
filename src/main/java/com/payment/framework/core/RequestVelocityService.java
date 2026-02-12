@@ -27,10 +27,6 @@ public class RequestVelocityService {
     @Value("${payment.velocity.max-per-ip-per-60s:0}")
     private int maxPerIpPer60s;
 
-    /**
-     * Record this request and return current counts in the last 60 seconds for this email and IP.
-     * Call at ingestion (before execute).
-     */
     public VelocitySnapshot recordAndCheck(String email, String clientIp) {
         long now = System.currentTimeMillis();
         long cutoff = now - WINDOW_MS;

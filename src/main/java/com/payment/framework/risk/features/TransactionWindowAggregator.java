@@ -30,11 +30,8 @@ public class TransactionWindowAggregator {
     private static final String ENTITY_TYPE_IP = "IP";
 
     private final Map<String, List<EventEntry>> store = new ConcurrentHashMap<>();
-    /** Card-level window (key = card key from paymentMethodId or bin+last4). Enables per-card velocity/failure risk. */
     private final Map<String, List<EventEntry>> cardStore = new ConcurrentHashMap<>();
-    /** Email-level window. Same email across card, wallet, BNPL. */
     private final Map<String, List<EventEntry>> emailStore = new ConcurrentHashMap<>();
-    /** IP-level window. Same IP across all payment types. */
     private final Map<String, List<EventEntry>> ipStore = new ConcurrentHashMap<>();
 
     public void record(PaymentEvent event) {
@@ -97,9 +94,6 @@ public class TransactionWindowAggregator {
         return "ip_" + event.getClientIp().trim();
     }
 
-    /**
-     * Card/account identity key for aggregation. Prefer PAR (stable across tokens/cards), then fingerprint (hash of BIN+last4), then network token, BIN+last4, paymentMethodId.
-     */
     public static String cardKeyFrom(PaymentEvent event) {
         if (event == null) return null;
         if (event.getPar() != null && !event.getPar().isBlank()) {
@@ -125,7 +119,6 @@ public class TransactionWindowAggregator {
         return getFeatures(entityIdFrom(event));
     }
 
-    /** Per-card features (velocity, failure rate, etc.) when card identity is present. Use for card-level risk. */
     public Optional<TransactionWindowFeatures> getCardFeatures(String cardKey) {
         return getFeaturesForStore(cardKey, ENTITY_TYPE_CARD, cardStore);
     }
@@ -135,7 +128,6 @@ public class TransactionWindowAggregator {
         return cardKey != null ? getCardFeatures(cardKey) : Optional.empty();
     }
 
-    /** Per-email features (velocity, failure rate) across all payment types (card, wallet, BNPL). */
     public Optional<TransactionWindowFeatures> getEmailFeatures(String email) {
         if (email == null || email.isBlank()) return Optional.empty();
         return getFeaturesForStore("email_" + email.trim().toLowerCase(), ENTITY_TYPE_EMAIL, emailStore);
@@ -146,7 +138,6 @@ public class TransactionWindowAggregator {
         return getEmailFeatures(event.getEmail());
     }
 
-    /** Per-IP features (velocity, failure rate) across all payment types. */
     public Optional<TransactionWindowFeatures> getIpFeatures(String clientIp) {
         if (clientIp == null || clientIp.isBlank()) return Optional.empty();
         return getFeaturesForStore("ip_" + clientIp.trim(), ENTITY_TYPE_IP, ipStore);
@@ -243,12 +234,10 @@ public class TransactionWindowAggregator {
 
     private double computeAmountTrend(List<EventEntry> entries) {
         if (entries.size() < 2) return 0.0;
-        // Simple linear regression: slope of amount over time
-        // Positive = increasing amounts, negative = decreasing amounts
         long timeSpan = entries.get(entries.size() - 1).timestampMs - entries.get(0).timestampMs;
         if (timeSpan == 0) return 0.0;
         BigDecimal amountDiff = entries.get(entries.size() - 1).amount.subtract(entries.get(0).amount);
-        return amountDiff.doubleValue() / (timeSpan / 1000.0); // Amount change per second
+        return amountDiff.doubleValue() / (timeSpan / 1000.0);
     }
 
     private int countIncreasingAmounts(List<EventEntry> entries) {
@@ -279,7 +268,7 @@ public class TransactionWindowAggregator {
         for (int i = 1; i < entries.size(); i++) {
             totalGap += entries.get(i).timestampMs - entries.get(i - 1).timestampMs;
         }
-        return (totalGap / 1000.0) / (entries.size() - 1); // Average gap in seconds
+        return (totalGap / 1000.0) / (entries.size() - 1);
     }
 
     private record EventEntry(String eventId, long timestampMs, BigDecimal amount, boolean failure) {}

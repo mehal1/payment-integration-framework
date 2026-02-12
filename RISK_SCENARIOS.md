@@ -11,17 +11,13 @@ See [LOCAL_TESTING.md](LOCAL_TESTING.md) for the comprehensive script and setup.
 Multiple transactions in short time.
 
 ```bash
-# Trigger 10+ payments in quick succession
 for i in {1..12}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
     -d "{\"idempotencyKey\":\"velocity-test-$i\",\"providerType\":\"MOCK\",\"amount\":100,\"currencyCode\":\"USD\",\"merchantReference\":\"merchant-1\"}" > /dev/null
 done
 
-# Wait for risk engine to process
 sleep 3
-
-# Check for alerts
 curl http://localhost:8080/api/v1/risk/alerts?limit=10
 ```
 
@@ -32,7 +28,6 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10
 Multiple failures (MockPSP fails when amount >= 999999).
 
 ```bash
-# Trigger multiple failing payments (amount >= 999999 triggers failure in MockPSPAdapter)
 for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
@@ -50,14 +45,12 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10
 Amount significantly higher than average (2x+ baseline).
 
 ```bash
-# First, establish a baseline with normal amounts
 for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
     -d "{\"idempotencyKey\":\"baseline-$i\",\"providerType\":\"MOCK\",\"amount\":100,\"currencyCode\":\"USD\",\"merchantReference\":\"merchant-3\"}" > /dev/null
 done
 
-# Then trigger an unusually high amount (2x+ average)
 curl -s -X POST http://localhost:8080/api/v1/payments/execute \
   -H "Content-Type: application/json" \
   -d '{"idempotencyKey":"unusual-amount","providerType":"MOCK","amount":500,"currencyCode":"USD","merchantReference":"merchant-3"}'
@@ -73,24 +66,14 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10
 Distributed failure pattern across mock Stripe and Adyen (same merchant).
 
 ```bash
-# Use multiple mock PSP adapters (MockStripeAdapter and MockAdyenAdapter) for same payment type (CARD).
-# Both Stripe and Adyen support card payments; events are aggregated by merchantReference.
-#
-# Note: In this framework we decide which PSP to use at runtime (routing/failover). So "failures
-# across Stripe and Adyen" reflects our routing, not necessarily a fraudster trying multiple
-# gateways. The signal is "high failure rate for this merchant"; the PSP mix can be a false-
-# positive driver if we overweight "spread across PSPs." True per-card cross-PSP attack detection
-# would require card identity (e.g. token/fingerprint) and aggregation by card.
 merchant="cross-psp-fraud-123"
 
-# Failures via "Stripe" mock adapter (3) - specify adapter via providerPayload
 for i in {1..3}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
     -d "{\"idempotencyKey\":\"psp-stripe-fail-$i\",\"providerType\":\"CARD\",\"amount\":999999,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\",\"providerPayload\":{\"testAdapterName\":\"MockStripeAdapter\"}}" > /dev/null
 done
 
-# Failures via "Adyen" mock adapter (2) - specify adapter via providerPayload
 for i in {1..2}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
@@ -99,7 +82,6 @@ done
 
 sleep 5
 curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0] | {entityId, riskScore, signalTypes}'
-# Should show one alert for the merchant with aggregated failure rate across both PSP adapters
 ```
 
 ---
@@ -111,7 +93,6 @@ The script `./test-all-risk-fraud-alerts-scenarios.sh` runs **Section 4** for th
 ### BNPL (Afterpay mock) – high failure rate
 
 ```bash
-# MockAfterpayAdapter fails when amount >= 888888; no card data in response
 merchant="bnpl-manual-test"
 for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
@@ -125,7 +106,6 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10 | jq '.[] | select(.entit
 ### Wallet mock – high failure rate
 
 ```bash
-# MockWalletAdapter fails when amount >= 777777; returns DPAN-style card data
 merchant="wallet-manual-test"
 for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
@@ -139,7 +119,6 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10 | jq '.[] | select(.entit
 ### Email cross-type – same email across CARD, BNPL, WALLET
 
 ```bash
-# Same email across payment types to trigger HIGH_EMAIL_FAILURE_RATE / HIGH_EMAIL_VELOCITY
 email="cross-type@example.com"
 merchant="email-cross-type-test"
 for i in {1..2}; do
@@ -164,18 +143,12 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=20 | jq '.[] | select(.signa
 Only when ML service is running on port 5001 and `payment.risk.ml.enabled: true` in `application.yaml`.
 
 ```bash
-# Ensure ML service is running on port 5001
-# Check if ML scoring is enabled in application.yaml:
-# payment.risk.ml.enabled: true
-
-# Trigger payments and check if alerts show "ML" in summary
 curl -X POST http://localhost:8080/api/v1/payments/execute \
   -H "Content-Type: application/json" \
   -d '{"idempotencyKey":"ml-test","providerType":"MOCK","amount":999999,"currencyCode":"USD","merchantReference":"merchant-1"}'
 
 sleep 3
 curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0].summary'
-# Should show "ML" in summary if ML service responded
 ```
 
 ---
@@ -192,12 +165,11 @@ for i in {1..4}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
     -d "{\"idempotencyKey\":\"card-test-$i\",\"providerType\":\"MOCK\",\"amount\":$amount,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\"}" > /dev/null
-  sleep 0.5  # Small gap between transactions
+  sleep 0.5
 done
 
 sleep 3
 curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0] | {summary, riskScore, signalTypes}'
-# Summary should mention "card testing pattern detected" if pattern is detected
 ```
 
 ---
@@ -213,12 +185,11 @@ for i in {1..5}; do
   curl -s -X POST http://localhost:8080/api/v1/payments/execute \
     -H "Content-Type: application/json" \
     -d "{\"idempotencyKey\":\"rapid-$i\",\"providerType\":\"MOCK\",\"amount\":100,\"currencyCode\":\"USD\",\"merchantReference\":\"$merchant\"}" > /dev/null
-  sleep 1  # 1 second gap (rapid-fire)
+  sleep 1
 done
 
 sleep 3
 curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0].summary'
-# Summary should mention "rapid-fire transactions" if detected
 ```
 
 ---
@@ -240,5 +211,4 @@ done
 
 sleep 3
 curl http://localhost:8080/api/v1/risk/alerts?limit=1 | jq '.[0] | {summary, riskScore}'
-# High variance may contribute to risk score
 ```
