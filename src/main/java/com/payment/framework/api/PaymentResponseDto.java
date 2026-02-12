@@ -42,4 +42,19 @@ public class PaymentResponseDto {
                 .metadata(result.getMetadata())
                 .build();
     }
+
+    /** Response when ingestion velocity check fails (too many requests per email/IP in 60s). */
+    public static PaymentResponseDto velocityExceeded(String idempotencyKey) {
+        return PaymentResponseDto.builder()
+                .idempotencyKey(idempotencyKey)
+                .providerTransactionId(null)
+                .status(TransactionStatus.FAILED)
+                .amount(BigDecimal.ZERO)
+                .currencyCode("")
+                .failureCode("VELOCITY_EXCEEDED")
+                .message("Too many requests from this email/IP in the last 60 seconds")
+                .timestamp(Instant.now())
+                .metadata(null)
+                .build();
+    }
 }

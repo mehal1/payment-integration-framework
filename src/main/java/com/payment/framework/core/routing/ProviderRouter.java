@@ -97,10 +97,26 @@ public class ProviderRouter {
             return Optional.empty();
         }
 
-        PSPAdapter selectedAdapter = healthyAdapters.stream()
-                .filter(a -> a.getProviderType() == selectedType.get())
-                .findFirst()
-                .orElse(null);
+        // For testing: if request specifies adapter name in metadata, use that adapter
+        PSPAdapter selectedAdapter = null;
+        if (request.getProviderPayload() != null && request.getProviderPayload().containsKey("testAdapterName")) {
+            String requestedAdapterName = (String) request.getProviderPayload().get("testAdapterName");
+            selectedAdapter = healthyAdapters.stream()
+                    .filter(a -> a.getPSPAdapterName().equals(requestedAdapterName))
+                    .findFirst()
+                    .orElse(null);
+            if (selectedAdapter != null) {
+                log.debug("Using test-specified adapter: {}", requestedAdapterName);
+            }
+        }
+        
+        // Default: select first adapter matching the selected type
+        if (selectedAdapter == null) {
+            selectedAdapter = healthyAdapters.stream()
+                    .filter(a -> a.getProviderType() == selectedType.get())
+                    .findFirst()
+                    .orElse(null);
+        }
 
         if (selectedAdapter == null) {
             log.error("Selected PSP type={} but no healthy adapter found", selectedType.get());

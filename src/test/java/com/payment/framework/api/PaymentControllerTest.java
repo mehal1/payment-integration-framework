@@ -4,6 +4,7 @@ import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentResult;
 import com.payment.framework.domain.TransactionStatus;
 import com.payment.framework.core.PaymentOrchestrator;
+import com.payment.framework.core.RequestVelocityService;
 import com.payment.framework.messaging.PaymentEventProducer;
 import com.payment.framework.persistence.service.PaymentPersistenceService;
 import org.junit.jupiter.api.Test;
@@ -40,8 +41,13 @@ class PaymentControllerTest {
     @MockitoBean
     private PaymentPersistenceService persistenceService;
 
+    @MockitoBean
+    private RequestVelocityService requestVelocityService;
+
     @Test
     void executeReturnsOkAndResultFromOrchestrator() throws Exception {
+        when(requestVelocityService.recordAndCheck(any(), any()))
+                .thenReturn(new RequestVelocityService.VelocitySnapshot(0, 0, false));
         PaymentResult result = PaymentResult.builder()
                 .idempotencyKey("key-1")
                 .providerTransactionId("tx-1")
@@ -76,6 +82,8 @@ class PaymentControllerTest {
 
     @Test
     void executeReturnsBadRequestWhenValidationFails() throws Exception {
+        when(requestVelocityService.recordAndCheck(any(), any()))
+                .thenReturn(new RequestVelocityService.VelocitySnapshot(0, 0, false));
         mockMvc.perform(post("/api/v1/payments/execute")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

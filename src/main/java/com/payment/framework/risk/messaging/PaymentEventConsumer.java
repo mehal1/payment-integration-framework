@@ -5,6 +5,7 @@ import com.payment.framework.persistence.service.PaymentPersistenceService;
 import com.payment.framework.persistence.service.RiskAlertPersistenceService;
 import com.payment.framework.risk.domain.RiskAlert;
 import com.payment.framework.risk.engine.RiskEngine;
+import com.payment.framework.risk.link.EmailParLinkStore;
 import com.payment.framework.risk.llm.AlertSummaryService;
 import com.payment.framework.risk.store.RecentAlertsStore;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,7 @@ public class PaymentEventConsumer {
     private final WebhookService webhookService;
     private final PaymentPersistenceService persistenceService;
     private final RiskAlertPersistenceService alertPersistenceService;
+    private final EmailParLinkStore emailParLinkStore;
 
     @KafkaListener(
             topics = "${payment.kafka.topic.payment-events:payment-events}",
@@ -62,6 +64,11 @@ public class PaymentEventConsumer {
             
             // Persist event to database for audit trail
             persistenceService.persistEvent(event);
+
+            // At response: link Email X to PAR Z for cross-method fraud
+            if (event.getEmail() != null && !event.getEmail().isBlank() && event.getPar() != null && !event.getPar().isBlank()) {
+                emailParLinkStore.link(event.getEmail(), event.getPar());
+            }
             
             Optional<RiskAlert> alertOpt = riskEngine.evaluate(event);
             

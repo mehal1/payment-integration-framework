@@ -29,6 +29,14 @@ public class PaymentEvent {
     String message;
     String merchantReference;
     String customerId;
+    String email;
+    String clientIp;
+    String paymentMethodId;
+    String cardBin;
+    String cardLast4;
+    String networkToken;
+    String par;
+    String cardFingerprint;
     Instant timestamp;
     String eventType;
 }

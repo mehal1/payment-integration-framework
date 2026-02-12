@@ -34,6 +34,7 @@ spring:
     baseline-on-migrate: true
 
 # Framework topic for payment lifecycle events (audit, compliance, ML)
+# Optional: payment.velocity.max-per-email-per-60s / max-per-ip-per-60s (default 0 = no limit), see RequestVelocityService
 payment:
   kafka:
     topic:

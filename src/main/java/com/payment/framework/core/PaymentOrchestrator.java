@@ -56,8 +56,9 @@ public class PaymentOrchestrator {
         if (adapters.isEmpty()) {
             log.warn("No PSP adapters found! Make sure adapters are annotated with @Component and implement PSPAdapter");
         }
+        // Multiple adapters can share a type (e.g. MockStripe + MockAdyen both CARD); keep first for getAdapter(type).
         adapterByType = adapters.stream()
-                .collect(Collectors.toMap(PSPAdapter::getProviderType, a -> a));
+                .collect(Collectors.toMap(PSPAdapter::getProviderType, a -> a, (first, second) -> first));
         log.info("Registered PSP adapters: {}", adapterByType.keySet());
         log.info("PaymentOrchestrator configuration: failoverEnabled={}, maxFailoverAttempts={}", 
                 failoverEnabled, maxFailoverAttempts);

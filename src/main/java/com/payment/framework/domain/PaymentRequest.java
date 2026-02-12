@@ -32,6 +32,12 @@ public class PaymentRequest {
 
     String merchantReference;
     String customerId;
+    /** Optional: Customer email. Used for ingestion velocity and Email→PAR linking for fraud. */
+    String email;
+    /** Optional: Client IP. Used for velocity check and fraud. */
+    String clientIp;
+    /** Optional: PSP payment method id or token (e.g. Stripe pm_xxx, Adyen storedPaymentMethodId). Merchants send what their PSP gave them; used for card-level risk aggregation. */
+    String paymentMethodId;
     Map<String, Object> providerPayload;
     String correlationId;
 

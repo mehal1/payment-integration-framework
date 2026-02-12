@@ -42,14 +42,25 @@ public class MlRiskScorer {
      */
     public Optional<Double> score(TransactionWindowFeatures features) {
         try {
-            Map<String, Object> request = Map.of(
-                    "totalCount", features.getTotalCount(),
-                    "failureCount", features.getFailureCount(),
-                    "failureRate", features.getFailureRate(),
-                    "countLast1Min", features.getCountLast1Min(),
-                    "avgAmount", features.getAvgAmount().doubleValue(),
-                    "maxAmount", features.getMaxAmount().doubleValue()
-            );
+            // Build request with all features (ML service can use what it needs)
+            Map<String, Object> request = new java.util.HashMap<>();
+            // Original features
+            request.put("totalCount", features.getTotalCount());
+            request.put("failureCount", features.getFailureCount());
+            request.put("failureRate", features.getFailureRate());
+            request.put("countLast1Min", features.getCountLast1Min());
+            request.put("avgAmount", features.getAvgAmount().doubleValue());
+            request.put("maxAmount", features.getMaxAmount().doubleValue());
+            // Enhanced features
+            request.put("minAmount", features.getMinAmount().doubleValue());
+            request.put("hourOfDay", features.getHourOfDay());
+            request.put("dayOfWeek", features.getDayOfWeek());
+            request.put("secondsSinceLastTransaction", features.getSecondsSinceLastTransaction());
+            request.put("amountVariance", features.getAmountVariance().doubleValue());
+            request.put("amountTrend", features.getAmountTrend());
+            request.put("increasingAmountCount", features.getIncreasingAmountCount());
+            request.put("decreasingAmountCount", features.getDecreasingAmountCount());
+            request.put("avgTimeGapSeconds", features.getAvgTimeGapSeconds());
 
             Map<String, Object> response = restTemplate.postForObject(
                     mlServiceUrl, request, Map.class

@@ -101,4 +101,30 @@ class TransactionWindowAggregatorTest {
         assertThat(features).isPresent();
         assertThat(features.get().getTotalCount()).isEqualTo(1);
     }
+
+    @Test
+    void getFeaturesComputesEnhancedFeatures() throws InterruptedException {
+        // Record transactions with increasing amounts (card testing pattern)
+        aggregator.record(event("e1", "merchant-test", new BigDecimal("10"), false));
+        Thread.sleep(100); // Small gap
+        aggregator.record(event("e2", "merchant-test", new BigDecimal("20"), false));
+        Thread.sleep(100);
+        aggregator.record(event("e3", "merchant-test", new BigDecimal("30"), false));
+
+        Optional<TransactionWindowFeatures> features = aggregator.getFeatures("merchant-test");
+
+        assertThat(features).isPresent();
+        TransactionWindowFeatures f = features.get();
+        
+        // Enhanced features should be computed
+        assertThat(f.getMinAmount()).isEqualByComparingTo("10");
+        assertThat(f.getHourOfDay()).isBetween(0, 23);
+        assertThat(f.getDayOfWeek()).isBetween(0, 6);
+        assertThat(f.getSecondsSinceLastTransaction()).isGreaterThanOrEqualTo(0);
+        assertThat(f.getAmountVariance()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
+        assertThat(f.getAmountTrend()).isGreaterThan(0); // Increasing amounts
+        assertThat(f.getIncreasingAmountCount()).isEqualTo(2); // e1->e2, e2->e3
+        assertThat(f.getDecreasingAmountCount()).isEqualTo(0);
+        assertThat(f.getAvgTimeGapSeconds()).isGreaterThan(0);
+    }
 }

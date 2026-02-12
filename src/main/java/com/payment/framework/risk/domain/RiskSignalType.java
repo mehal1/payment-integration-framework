@@ -15,5 +15,13 @@ public enum RiskSignalType {
     /** Compliance: pattern that may require reporting (e.g. structuring). */
     COMPLIANCE_ANOMALY,
     /** Systemic: provider or PSP degradation. */
-    SYSTEMIC_RISK
+    SYSTEMIC_RISK,
+    /** Same email used for too many requests in short window (cross-type: card, wallet, BNPL). */
+    HIGH_EMAIL_VELOCITY,
+    /** Same IP used for too many requests in short window (cross-type). */
+    HIGH_IP_VELOCITY,
+    /** High failure rate for this email across payment types. */
+    HIGH_EMAIL_FAILURE_RATE,
+    /** High failure rate for this IP across payment types. */
+    HIGH_IP_FAILURE_RATE
 }

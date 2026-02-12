@@ -31,6 +31,9 @@ public class PaymentRequestDto {
 
     private String merchantReference;
     private String customerId;
+    private String email;
+    private String clientIp;
+    private String paymentMethodId;
     private Map<String, Object> providerPayload;
     private String correlationId;
 }

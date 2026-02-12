@@ -9,7 +9,11 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -41,6 +45,14 @@ public class PaymentEventProducer {
                 .message(null)
                 .merchantReference(request.getMerchantReference())
                 .customerId(request.getCustomerId())
+                .email(request.getEmail())
+                .clientIp(request.getClientIp())
+                .paymentMethodId(request.getPaymentMethodId())
+                .cardBin(null)
+                .cardLast4(null)
+                .networkToken(null)
+                .par(null)
+                .cardFingerprint(null)
                 .timestamp(Instant.now())
                 .eventType("PAYMENT_REQUESTED")
                 .build();
@@ -75,10 +87,40 @@ public class PaymentEventProducer {
                 .message(result.getMessage())
                 .merchantReference(request.getMerchantReference())
                 .customerId(request.getCustomerId())
+                .email(request.getEmail())
+                .clientIp(request.getClientIp())
+                .paymentMethodId(request.getPaymentMethodId())
+                .cardBin(result.getCardBin())
+                .cardLast4(result.getCardLast4())
+                .networkToken(result.getNetworkToken())
+                .par(result.getPar())
+                .cardFingerprint(computeCardFingerprint(result))
                 .timestamp(result.getTimestamp())
                 .eventType(eventType)
                 .build();
         send(request.getIdempotencyKey(), event);
+    }
+
+    /** Universal fingerprint: use adapter-provided or hash(BIN+last4) when available. */
+    private static String computeCardFingerprint(PaymentResult result) {
+        if (result.getCardFingerprint() != null && !result.getCardFingerprint().isBlank()) {
+            return result.getCardFingerprint();
+        }
+        if (result.getCardBin() != null && result.getCardLast4() != null
+                && !result.getCardBin().isBlank() && !result.getCardLast4().isBlank()) {
+            return hashForFingerprint(result.getCardBin() + "_" + result.getCardLast4());
+        }
+        return null;
+    }
+
+    private static String hashForFingerprint(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            return "fp_" + HexFormat.of().formatHex(digest).substring(0, 16);
+        } catch (NoSuchAlgorithmException e) {
+            return "fp_" + Integer.toHexString(input.hashCode());
+        }
     }
 
     private void send(String key, PaymentEvent event) {

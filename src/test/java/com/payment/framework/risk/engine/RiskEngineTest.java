@@ -43,6 +43,30 @@ class RiskEngineTest {
                 .build();
     }
 
+    private static PaymentEvent eventWithEmail(String id, String merchantRef, String email, BigDecimal amount, boolean failure) {
+        return PaymentEvent.builder()
+                .eventId(id)
+                .merchantReference(merchantRef)
+                .email(email)
+                .amount(amount)
+                .currencyCode("USD")
+                .timestamp(Instant.now())
+                .eventType(failure ? "PAYMENT_FAILED" : "PAYMENT_COMPLETED")
+                .build();
+    }
+
+    private static PaymentEvent eventWithIp(String id, String merchantRef, String clientIp, BigDecimal amount, boolean failure) {
+        return PaymentEvent.builder()
+                .eventId(id)
+                .merchantReference(merchantRef)
+                .clientIp(clientIp)
+                .amount(amount)
+                .currencyCode("USD")
+                .timestamp(Instant.now())
+                .eventType(failure ? "PAYMENT_FAILED" : "PAYMENT_COMPLETED")
+                .build();
+    }
+
     @Test
     void evaluateReturnsEmptyWhenSingleSuccessEvent() {
         Optional<RiskAlert> alert = riskEngine.evaluate(event("e1", "m1", new BigDecimal("100"), false));
@@ -99,5 +123,33 @@ class RiskEngineTest {
         assertThat(alert.get().getSummary()).contains("Risk score");
         assertThat(alert.get().getSummary()).contains("failure rate");
         assertThat(alert.get().getSummary()).contains("velocity");
+    }
+
+    @Test
+    void evaluateProducesEmailFailureRateAlertAcrossPaymentTypes() {
+        // Same email used for multiple payments (e.g. card + BNPL + wallet); high failure rate on email dimension
+        riskEngine.evaluate(eventWithEmail("e1", "m1", "user@test.com", new BigDecimal("50"), true));
+        riskEngine.evaluate(eventWithEmail("e2", "m2", "user@test.com", new BigDecimal("50"), true));
+        riskEngine.evaluate(eventWithEmail("e3", "m3", "user@test.com", new BigDecimal("50"), false));
+        riskEngine.evaluate(eventWithEmail("e4", "m4", "user@test.com", new BigDecimal("50"), true));
+
+        Optional<RiskAlert> alert = riskEngine.evaluate(eventWithEmail("e5", "m5", "user@test.com", new BigDecimal("50"), true));
+
+        assertThat(alert).isPresent();
+        assertThat(alert.get().getSignalTypes()).contains(RiskSignalType.HIGH_EMAIL_FAILURE_RATE);
+        assertThat(alert.get().getSummary()).contains("email cross-type");
+    }
+
+    @Test
+    void evaluateProducesIpVelocityAlertWhenSameIpHighVolume() {
+        ReflectionTestUtils.setField(riskEngine, "velocity1MinThreshold", 5);
+        for (int i = 0; i < 6; i++) {
+            riskEngine.evaluate(eventWithIp("e" + i, "m" + i, "192.168.1.1", new BigDecimal("10"), false));
+        }
+        Optional<RiskAlert> alert = riskEngine.evaluate(eventWithIp("e6", "m6", "192.168.1.1", new BigDecimal("10"), false));
+
+        assertThat(alert).isPresent();
+        assertThat(alert.get().getSignalTypes()).contains(RiskSignalType.HIGH_IP_VELOCITY);
+        assertThat(alert.get().getSummary()).contains("IP cross-type");
     }
 }

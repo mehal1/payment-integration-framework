@@ -61,8 +61,8 @@ public class KafkaConfig {
                 try {
                     byte[] result = objectMapper.writeValueAsBytes(data);
                     if (result != null) {
-                        String json = new String(result);
-                        log.info("Serialized PaymentEvent to JSON (topic={}, length={}): {}", topic, result.length, json);
+                        // Do not log message body: it may contain card data (paymentMethodId, cardBin, cardLast4)
+                        log.debug("Serialized PaymentEvent (topic={}, length={}, eventId={})", topic, result.length, data.getEventId());
                     }
                     return result;
                 } catch (Exception e) {
