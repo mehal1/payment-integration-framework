@@ -1,5 +1,6 @@
 HELP.md
 TECHNICAL_DESIGN.md
+TECHNICAL_DESIGN_E2E_SECTION.md
 target/
 # Maven wrapper: ignore jar but commit properties file
 .mvn/wrapper/maven-wrapper.jar
