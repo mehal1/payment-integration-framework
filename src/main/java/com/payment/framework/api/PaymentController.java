@@ -7,6 +7,10 @@ import com.payment.framework.domain.PaymentResult;
 import com.payment.framework.messaging.PaymentEventProducer;
 import com.payment.framework.persistence.service.PaymentPersistenceService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +39,19 @@ public class PaymentController {
     private final RequestVelocityService requestVelocityService;
 
     @PostMapping("/execute")
-    @Operation(summary = "Execute payment", description = "Submit a payment. Use idempotencyKey for safe retries.")
+    @Operation(
+            summary = "Execute payment",
+            description = "Submit a payment. Use idempotencyKey for safe retries. On success returns 200 with status SUCCESS/CAPTURED/PENDING; "
+                    + "on provider decline returns 200 with status FAILED and failureCode/message. "
+                    + "Failure codes (when status=FAILED): MOCK_STRIPE_DECLINED, MOCK_ADYEN_DECLINED, MOCK_WALLET_DECLINED, MOCK_AFTERPAY_DECLINED, MOCK_DECLINED, or provider-specific.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Payment processed. Check body.status: SUCCESS/CAPTURED/PENDING or FAILED (with failureCode/message).",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = PaymentResponseDto.class))),
+            @ApiResponse(responseCode = "429", description = "Velocity exceeded: too many requests from this email/IP in the last 60s. Body has failureCode=VELOCITY_EXCEEDED.",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = PaymentResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "Validation failed (invalid request body) or bad request. Body: { \"error\": \"VALIDATION_FAILED\"|\"BAD_REQUEST\", \"details\"|\"message\": ... }"),
+            @ApiResponse(responseCode = "500", description = "Internal error. Body: { \"error\": \"INTERNAL_ERROR\", \"message\": \"...\" }")
+    })
     public ResponseEntity<PaymentResponseDto> execute(@Valid @RequestBody PaymentRequestDto dto, HttpServletRequest httpRequest) {
         String correlationId = dto.getCorrelationId() != null ? dto.getCorrelationId() : UUID.randomUUID().toString();
         String clientIp = dto.getClientIp() != null && !dto.getClientIp().isBlank()

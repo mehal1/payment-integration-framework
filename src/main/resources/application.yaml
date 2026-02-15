@@ -121,3 +121,4 @@ springdoc:
     path: /api-docs
   swagger-ui:
     enabled: true
+    tagsSorter: alpha

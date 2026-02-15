@@ -10,6 +10,8 @@ import com.payment.framework.risk.features.TransactionWindowAggregator;
 import com.payment.framework.risk.messaging.WebhookService;
 import com.payment.framework.risk.store.RecentAlertsStore;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -105,6 +107,10 @@ public class RiskAlertController {
     @GetMapping(value = "/demo/training-data", produces = "text/csv")
     @Operation(summary = "Generate synthetic training data (CSV)",
             description = "Generates many synthetic payment events, computes window features per entity, and labels by rule (e.g. fraud=1 if failureRate>=0.5). Use for local/CI ML bootstrapping. No Kafka required.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "CSV file with header: entityId,totalCount,failureCount,failureRate,...,label"),
+            @ApiResponse(responseCode = "400", description = "Invalid rows. rows must be between 10 and 10000. Body: plain text error message.")
+    })
     public ResponseEntity<String> getTrainingData(
             @RequestParam(defaultValue = "200") int rows) {
         if (rows < 10 || rows > 10_000) {
@@ -161,7 +167,11 @@ public class RiskAlertController {
     }
 
     @PostMapping("/webhooks")
-    @Operation(summary = "Register webhook URL", description = "Register a webhook URL to receive risk alerts for an entity (merchant/customer)")
+    @Operation(summary = "Register webhook URL", description = "Register a webhook URL to receive risk alerts for an entity (merchant/customer). Request body: { \"entityId\": \"...\", \"webhookUrl\": \"...\" }")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Webhook registered"),
+            @ApiResponse(responseCode = "400", description = "Missing required fields. Body: { \"error\": \"Missing required fields: entityId, webhookUrl\" }")
+    })
     public ResponseEntity<Map<String, Object>> registerWebhook(
             @RequestBody Map<String, String> request) {
         String entityId = request.get("entityId");

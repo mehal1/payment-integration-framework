@@ -457,7 +457,7 @@ The framework supports ML-based risk scoring:
    ```
 3. **Generate training data**:
    ```bash
-   curl http://localhost:8080/api/v1/risk/training-data?merchantId=merchant-1&limit=1000
+   curl "http://localhost:8080/api/v1/risk/demo/training-data?rows=1000"
    ```
 
 ## License
