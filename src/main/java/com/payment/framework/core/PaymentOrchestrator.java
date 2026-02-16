@@ -1,5 +1,6 @@
 package com.payment.framework.core;
 
+import com.payment.framework.api.RecommendedPspUnavailableException;
 import com.payment.framework.core.routing.ProviderPerformanceMetrics;
 import com.payment.framework.core.routing.ProviderRouter;
 import com.payment.framework.domain.PaymentProviderType;
@@ -188,15 +189,14 @@ public class PaymentOrchestrator {
             } catch (CallNotPermittedException e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
                 metrics.recordFailure(providerType, latencyMs);
-                log.warn("Circuit open for provider={}, attempting failover (attempt={})",
-                        providerType, attempt + 1);
+                log.warn("Circuit open for provider={} (attempt={})", providerType, attempt + 1);
                 lastException = e;
-                
-                if (!failoverEnabled || attempt >= maxFailoverAttempts - 1) {
-                    break;
+                if (failoverEnabled && attempt < maxFailoverAttempts - 1) {
+                    throw new RecommendedPspUnavailableException(
+                            "The recommended PSP is temporarily unavailable. Call GET /api/v1/routing/recommend again and re-tokenize with the new recommended PSP, then retry POST /api/v1/payments/execute.",
+                            e);
                 }
-                // Continue to next provider
-
+                break;
             } catch (Exception e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
                 metrics.recordFailure(providerType, latencyMs);

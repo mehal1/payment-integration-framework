@@ -78,20 +78,16 @@ For detailed local setup and testing instructions, see [LOCAL_TESTING.md](LOCAL_
 
 Simple end-to-end flow from customer checkout to response:
 
-**Simplified Flow:**
+1. **Get recommendation** — `GET /api/v1/routing/recommend?amount=<amount>&currencyCode=<code>&providerType=CARD`. Response gives `recommendedPspId` and `recommendedProviderType`.
+2. **Get a token** — Merchant will send that PSP’s token.
+3. **Execute** — `POST /api/v1/payments/execute` with that token in `paymentMethodId`, plus `amount`, `currencyCode`, `providerType`, and `idempotencyKey`.
+4. **Framework receives** — PaymentController processes the request.
+5. **Idempotency** — Redis lookup; if duplicate, return cached result (<10ms); else continue.
+6. **Select provider** — Router picks provider (e.g. WeightedRoundRobin, CostBased). If that PSP is down you may get 503 → then go back to step 1, get a new recommendation and token, and retry.
+7. **Execute payment** — Adapter calls the provider (circuit breaker, retry). Result stored in Redis, event published to Kafka.
+8. **Response** — Standardized result returned to the client. Risk engine processes the event in the background.
 
-1. **Customer sends request** → POST to `/api/v1/payments/execute` with payment details
-2. **Framework receives** → PaymentController processes request
-3. **Check idempotency** → Redis lookup for duplicate request
-   - **If duplicate**: Return cached result instantly (<10ms)
-   - **If new**: Continue to payment execution
-4. **Select provider** → Router picks best provider (WeightedRoundRobin, CostBased, etc.)
-5. **Execute payment** → Call provider with circuit breaker and retry
-   - **If provider fails**: Automatically retry with next provider (up to 3 attempts)
-6. **Store result** → Save in Redis for future idempotency checks (24-hour TTL)
-7. **Publish event** → Send to Kafka for audit and risk analysis (async, non-blocking)
-8. **Return response** → Send standardized result to customer UI
-9. **Risk processing** → Risk engine analyzes event in background (doesn't block response)
+**Design note:** Two API calls (recommend, then execute). Merchant must add tokenization for each PSP they support (each has its own SDK). This framework can be extended to add an orchestrator vault (to store card and payment token instead).
 
 **Response Time**: Typically 200-500ms (provider-dependent). Idempotency cache hits return in <10ms.
 
@@ -99,8 +95,9 @@ Simple end-to-end flow from customer checkout to response:
 
 - **Duplicate Request**: If same `idempotencyKey` is sent twice, second request returns cached result from Redis (<10ms)
 - **Provider Failure**: Framework automatically fails over to next best provider (up to 3 attempts)
+- **RECOMMENDED_PSP_UNAVAILABLE (503)**: if the PSP you tokenized with is down (e.g. circuit open), the framework returns 503 , and Merchant can call Call `GET /api/v1/routing/recommend` again, re-tokenize with the new recommendation, and retry.
 - **All Providers Down**: Returns `ALL_PROVIDERS_FAILED` error after exhausting all providers
-- **Circuit Breaker Open**: Provider skipped, failover to next provider
+- **Circuit Breaker Open**: Provider skipped; this will result in 503 RECOMMENDED_PSP_UNAVAILABLE (see above)
 - **Kafka Unavailable**: Payment still processes, but events may be lost (non-blocking)
 
 **Idempotency Guarantee**: Same `idempotencyKey` always returns same result, even across provider failovers.
@@ -147,10 +144,13 @@ graph LR
         PSPs[**PSPs**<br/>**Stripe, Adyen, PayPal**]
     end
 
+    MerchantApps -->|**0. GET recommend**| API
+    API -->|**0a. selectProvider**| Router
+    API -->|**0b. recommendedPspId**| MerchantApps
     MerchantApps -->|**1. Payment Request**| API
     API -->|**2.**| Orchestrator
     Orchestrator <-->|**3. Idempotency**| Redis
-    Orchestrator -->|**4.**| Router
+    Orchestrator -->|**4. selectProvider**| Router
     Router -->|**5.**| Adapters
     Adapters <-->|**6. API Calls**| PSPs
     Orchestrator -->|**7. Publish Events**| Kafka
@@ -159,16 +159,17 @@ graph LR
     Kafka -->|**11. Persist Events**| PostgreSQL
     API -->|**8. Response**| MerchantApps
 
-    style API fill:#4A90E2
-    style Orchestrator fill:#4A90E2
-    style Router fill:#4A90E2
-    style Kafka fill:#FF6B6B
-    style Redis fill:#4ECDC4
-    style PostgreSQL fill:#336791
-    style PSPs fill:#95E1D3
-    style MerchantApps fill:#E8F4F8
+    style API fill:#4A90E2,stroke:#333,font-weight:bold
+    style Orchestrator fill:#4A90E2,stroke:#333,font-weight:bold
+    style Router fill:#4A90E2,stroke:#333,font-weight:bold
+    style Adapters fill:#4A90E2,stroke:#333,font-weight:bold
+    style Kafka fill:#FF6B6B,stroke:#333,font-weight:bold
+    style Redis fill:#4ECDC4,stroke:#333,font-weight:bold
+    style PostgreSQL fill:#336791,stroke:#333,font-weight:bold
+    style PSPs fill:#95E1D3,stroke:#333,font-weight:bold
+    style MerchantApps fill:#E8F4F8,stroke:#333,font-weight:bold
     style PSLabel fill:transparent,stroke:transparent,color:#000000
-    style RiskEngine fill:#F5A623
+    style RiskEngine fill:#F5A623,stroke:#333,font-weight:bold
 ```
 
 ### Project 2: Risk & Fraud Detection Architecture
@@ -445,7 +446,7 @@ For detailed database setup, schema documentation, querying examples, and troubl
 
 The framework supports ML-based risk scoring:
 
-1. **Start ML service** (Flask/FastAPI) on port 5001
+1. **Start the ML service** ([risk-ml-service](https://github.com/mehal1/risk-ml-service)) on port 5001
 2. **Enable ML scoring** in `application.yaml`:
    ```yaml
    payment:
