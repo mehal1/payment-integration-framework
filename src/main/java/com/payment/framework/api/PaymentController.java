@@ -41,7 +41,9 @@ public class PaymentController {
     @PostMapping("/execute")
     @Operation(
             summary = "Execute payment",
-            description = "Submit a payment. Use idempotencyKey for safe retries. On success returns 200 with status SUCCESS/CAPTURED/PENDING; "
+            description = "Submit a payment with a universal payment token (from the merchant's vault, e.g. VGS). "
+                    + "Send the token in paymentMethodId; the framework routes to the best PSP and resolves the token for the chosen provider. "
+                    + "Use idempotencyKey for safe retries. On success returns 200 with status SUCCESS/CAPTURED/PENDING; "
                     + "on provider decline returns 200 with status FAILED and failureCode/message. "
                     + "Failure codes (when status=FAILED): MOCK_STRIPE_DECLINED, MOCK_ADYEN_DECLINED, MOCK_WALLET_DECLINED, MOCK_AFTERPAY_DECLINED, MOCK_DECLINED, or provider-specific.")
     @ApiResponses({
@@ -50,7 +52,7 @@ public class PaymentController {
             @ApiResponse(responseCode = "429", description = "Velocity exceeded: too many requests from this email/IP in the last 60s. Body has failureCode=VELOCITY_EXCEEDED.",
                     content = @Content(mediaType = "application/json", schema = @Schema(implementation = PaymentResponseDto.class))),
             @ApiResponse(responseCode = "400", description = "Validation failed (invalid request body) or bad request. Body: { \"error\": \"VALIDATION_FAILED\"|\"BAD_REQUEST\", \"details\"|\"message\": ... }"),
-            @ApiResponse(responseCode = "503", description = "Recommended PSP unavailable (Method 1). Body: { \"error\": \"RECOMMENDED_PSP_UNAVAILABLE\", \"message\": \"...\" }. Call GET /api/v1/routing/recommend again, re-tokenize, and retry."),
+            @ApiResponse(responseCode = "503", description = "No PSP available (all down or circuit open). Body: { \"error\": \"NO_PSP_AVAILABLE\", \"message\": \"...\" }. Retry later."),
             @ApiResponse(responseCode = "500", description = "Internal error. Body: { \"error\": \"INTERNAL_ERROR\", \"message\": \"...\" }")
     })
     public ResponseEntity<PaymentResponseDto> execute(@Valid @RequestBody PaymentRequestDto dto, HttpServletRequest httpRequest) {

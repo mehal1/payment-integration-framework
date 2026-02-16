@@ -1,6 +1,6 @@
 package com.payment.framework.core;
 
-import com.payment.framework.api.RecommendedPspUnavailableException;
+import com.payment.framework.api.NoPspAvailableException;
 import com.payment.framework.core.routing.ProviderPerformanceMetrics;
 import com.payment.framework.core.routing.ProviderRouter;
 import com.payment.framework.domain.PaymentProviderType;
@@ -136,11 +136,7 @@ public class PaymentOrchestrator {
             if (adapterOpt.isEmpty()) {
                 log.warn("No healthy PSP available for type={} after {} attempts", 
                         requestedType, attempt);
-                PaymentResult failureResult = buildFailureResult(request, "NO_PROVIDER_AVAILABLE", 
-                        "No healthy PSP available");
-                log.debug("Built failure result: status={}, idempotencyKey={}", 
-                        failureResult.getStatus(), failureResult.getIdempotencyKey());
-                return failureResult;
+                throw new NoPspAvailableException("No PSP available. Retry later.");
             }
 
             PSPAdapter adapter = adapterOpt.get();
@@ -189,14 +185,11 @@ public class PaymentOrchestrator {
             } catch (CallNotPermittedException e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
                 metrics.recordFailure(providerType, latencyMs);
-                log.warn("Circuit open for provider={} (attempt={})", providerType, attempt + 1);
+                log.warn("Circuit open for provider={} (attempt={}); failing over to next PSP", providerType, attempt + 1);
                 lastException = e;
-                if (failoverEnabled && attempt < maxFailoverAttempts - 1) {
-                    throw new RecommendedPspUnavailableException(
-                            "The recommended PSP is temporarily unavailable. Call GET /api/v1/routing/recommend again and re-tokenize with the new recommended PSP, then retry POST /api/v1/payments/execute.",
-                            e);
+                if (!failoverEnabled || attempt >= maxFailoverAttempts - 1) {
+                    break;
                 }
-                break;
             } catch (Exception e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
                 metrics.recordFailure(providerType, latencyMs);
@@ -215,11 +208,7 @@ public class PaymentOrchestrator {
 
         log.error("All PSP attempts failed for type={} after {} attempts",
                 requestedType, attemptedAdapters.size());
-        PaymentResult failureResult = buildFailureResult(request, "ALL_PROVIDERS_FAILED",
-                "All PSPs failed: " + attemptedAdapters.size() + " PSPs attempted");
-        log.debug("Built final failure result: status={}, idempotencyKey={}, message={}", 
-                failureResult.getStatus(), failureResult.getIdempotencyKey(), failureResult.getMessage());
-        return failureResult;
+        throw new NoPspAvailableException("No PSP available. All " + attemptedAdapters.size() + " PSP(s) failed or unavailable. Retry later.");
     }
 
     /**

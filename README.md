@@ -76,28 +76,23 @@ For detailed local setup and testing instructions, see [LOCAL_TESTING.md](LOCAL_
 
 ### Checkout Flow: Customer to Framework Response
 
-Simple end-to-end flow from customer checkout to response:
+Simple end-to-end flow from customer checkout to response.
 
-1. **Get recommendation** — `GET /api/v1/routing/recommend?amount=<amount>&currencyCode=<code>&providerType=CARD`. Response gives `recommendedPspId` and `recommendedProviderType`.
-2. **Get a token** — Merchant will send that PSP’s token.
-3. **Execute** — `POST /api/v1/payments/execute` with that token in `paymentMethodId`, plus `amount`, `currencyCode`, `providerType`, and `idempotencyKey`.
-4. **Framework receives** — PaymentController processes the request.
-5. **Idempotency** — Redis lookup; if duplicate, return cached result (<10ms); else continue.
-6. **Select provider** — Router picks provider (e.g. WeightedRoundRobin, CostBased). If that PSP is down you may get 503 → then go back to step 1, get a new recommendation and token, and retry.
-7. **Execute payment** — Adapter calls the provider (circuit breaker, retry). Result stored in Redis, event published to Kafka.
-8. **Response** — Standardized result returned to the client. Risk engine processes the event in the background.
-
-**Design note:** Two API calls (recommend, then execute). Merchant must add tokenization for each PSP they support (each has its own SDK). This framework can be extended to add an orchestrator vault (to store card and payment token instead).
+1. **Submit payment** — Merchant calls `POST /api/v1/payments/execute` with a **universal payment token** (from their vault, e.g. VGS, Spreedly) in `paymentMethodId`, plus `amount`, `currencyCode`, `providerType`, and `idempotencyKey`.
+2. **Framework receives** — PaymentController processes the request.
+3. **Idempotency** — Redis lookup; if duplicate, return cached result (<10ms); else continue.
+4. **Select provider** — Router picks provider (e.g. WeightedRoundRobin, CostBased). With universal token, the framework can fail over to another PSP without the merchant re-tokenizing.
+5. **Execute payment** — Adapter (and vault resolution for the chosen PSP) runs; circuit breaker, retry. Result stored in Redis, event published to Kafka.
+6. **Response** — Standardized result returned to the client. Risk engine processes the event in the background.
 
 **Response Time**: Typically 200-500ms (provider-dependent). Idempotency cache hits return in <10ms.
 
 **Error Scenarios:**
 
 - **Duplicate Request**: If same `idempotencyKey` is sent twice, second request returns cached result from Redis (<10ms)
-- **Provider Failure**: Framework automatically fails over to next best provider (up to 3 attempts)
-- **RECOMMENDED_PSP_UNAVAILABLE (503)**: if the PSP you tokenized with is down (e.g. circuit open), the framework returns 503 , and Merchant can call Call `GET /api/v1/routing/recommend` again, re-tokenize with the new recommendation, and retry.
-- **All Providers Down**: Returns `ALL_PROVIDERS_FAILED` error after exhausting all providers
-- **Circuit Breaker Open**: Provider skipped; this will result in 503 RECOMMENDED_PSP_UNAVAILABLE (see above)
+- **Provider Failure**: Framework automatically fails over to next best provider (up to 3 attempts); same universal token is used
+- **No PSP available (503)**: When no healthy PSP exists or all fail after failover, returns **503** with body `{ "error": "NO_PSP_AVAILABLE", "message": "..." }`. Client should retry later (not a permanent decline).
+- **Circuit Breaker Open**: Provider skipped; framework tries next PSP
 - **Kafka Unavailable**: Payment still processes, but events may be lost (non-blocking)
 
 **Idempotency Guarantee**: Same `idempotencyKey` always returns same result, even across provider failovers.
@@ -144,9 +139,6 @@ graph LR
         PSPs[**PSPs**<br/>**Stripe, Adyen, PayPal**]
     end
 
-    MerchantApps -->|**0. GET recommend**| API
-    API -->|**0a. selectProvider**| Router
-    API -->|**0b. recommendedPspId**| MerchantApps
     MerchantApps -->|**1. Payment Request**| API
     API -->|**2.**| Orchestrator
     Orchestrator <-->|**3. Idempotency**| Redis

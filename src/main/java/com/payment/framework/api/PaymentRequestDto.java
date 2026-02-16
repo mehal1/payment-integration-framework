@@ -11,6 +11,7 @@ import java.util.Map;
 
 /**
  * REST API request body for initiating a payment.
+ * The framework expects a universal payment token from the merchant (e.g. from a vault like VGS).
  */
 @Data
 public class PaymentRequestDto {

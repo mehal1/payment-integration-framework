@@ -35,13 +35,13 @@ public class GlobalExceptionHandler {
                 .body(Map.of("error", "BAD_REQUEST", "message", ex.getMessage()));
     }
 
-    @ExceptionHandler(RecommendedPspUnavailableException.class)
-    public ResponseEntity<Map<String, String>> handleRecommendedPspUnavailable(RecommendedPspUnavailableException ex) {
+    @ExceptionHandler(NoPspAvailableException.class)
+    public ResponseEntity<Map<String, String>> handleNoPspAvailable(NoPspAvailableException ex) {
         return ResponseEntity
                 .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(
-                        "error", "RECOMMENDED_PSP_UNAVAILABLE",
-                        "message", ex.getMessage() != null ? ex.getMessage() : "The recommended PSP is temporarily unavailable. Call GET /api/v1/routing/recommend again and re-tokenize with the new recommended PSP, then retry POST /api/v1/payments/execute."
+                        "error", "NO_PSP_AVAILABLE",
+                        "message", ex.getMessage() != null ? ex.getMessage() : "No PSP available. Retry later."
                 ));
     }
 
