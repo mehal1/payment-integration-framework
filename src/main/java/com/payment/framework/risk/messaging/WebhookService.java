@@ -38,6 +38,9 @@ public class WebhookService {
     
     @Value("${payment.risk.webhook.timeout-ms:5000}")
     private int timeoutMs;
+    
+    @Value("${payment.risk.webhook.max-delay-ms:30000}")
+    private long maxDelayMs;
 
     public WebhookService(@Value("${payment.risk.webhook.timeout-ms:5000}") int timeoutMs) {
         this.timeoutMs = timeoutMs;
@@ -84,7 +87,8 @@ public class WebhookService {
                     alert.getAlertId(), webhookUrl);
         } catch (Exception e) {
             if (attempt < maxRetries) {
-                long delay = retryDelayMs * (attempt + 1);
+                // Exponential backoff: delay = baseDelay * 2^attempt (capped at maxDelayMs)
+                long delay = Math.min(retryDelayMs * (1L << attempt), maxDelayMs);
                 log.warn("Webhook delivery failed for alert {} to {} (attempt {}), retrying in {}ms: {}", 
                         alert.getAlertId(), webhookUrl, attempt + 1, delay, e.getMessage());
                 

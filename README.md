@@ -12,16 +12,21 @@ Built on distributed systems architecture principles using Spring Boot, Kafka, R
 - Building resilient systems with circuit breakers and retry logic
 - Creating an event-driven architecture for audit and compliance
 
+## Design Document
+
+For detailed technical architecture, component interactions, and data flows, see:
+- [Technical Design Document](https://docs.google.com/document/d/1fVO1pxmaC6wFoxTD2r866lqaJ00GhbNUaimCPFqxEgk/edit?tab=t.0)
+
 ## Key Benefits
 
 - **Vendor Independence**: Not locked into a single PSP - easily switch or add new providers without rewriting code.
-- **Cost Optimization**: Automatically routes to the most cost-effective PSP based on transaction fees and success rates.
+- **Cost/Performance Optimization**: Automatically routes to the most cost/performnce-effective PSP based on transaction fees and success rates.
 - **High Availability**: Automatic failover to backup PSPs when primary PSP fails, ensuring payments continue processing.
 - **Duplicate Charge Prevention**: Built-in idempotency prevents duplicate charges from network retries or user double-clicks.
 - **Unified Fraud Detection**: Detects fraud from single PSP and across multiple PSPs (Stripe, PayPal, Adyen, etc.) - identifies high failure rates and velocity attacks within a single PSP, plus cross-PSP distributed attacks like gateway hopping, distributed velocity, and card testing that individual PSPs miss.
 - **Fraud Protection**: ML-based risk scoring analyzes payments in near-real-time and sends alerts when fraud is detected
 - **Compliance & Audit**: Automatic event logging and audit trails for regulatory compliance and transaction tracking.
-- **Easy Scaling**: Start with one PSP, add more as business grows - framework handles complexity automatically.
+- **Scalable by Design**: Start with one PSP, add more as business grows - framework can handle complexity.
 
 ## Features
 
@@ -82,7 +87,7 @@ Simple end-to-end flow from customer checkout to response.
 2. **Framework receives** — PaymentController processes the request.
 3. **Idempotency** — Redis lookup; if duplicate, return cached result (<10ms); else continue.
 4. **Select provider** — Router picks provider (e.g. WeightedRoundRobin, CostBased). With universal token, the framework can fail over to another PSP without the merchant re-tokenizing.
-5. **Execute payment** — Adapter (and vault resolution for the chosen PSP) runs; circuit breaker, retry. Result stored in Redis, event published to Kafka.
+5. **Execute payment** — Payment adapter calls the chosen PSP for payment processing; circuit breaker, retry. Result stored in Redis, event published to Kafka.
 6. **Response** — Standardized result returned to the client. Risk engine processes the event in the background.
 
 **Response Time**: Typically 200-500ms (provider-dependent). Idempotency cache hits return in <10ms.

@@ -64,7 +64,8 @@ payment:
     webhook:
       enabled: true  # Set to true to enable webhook delivery
       max-retries: 3  # Maximum retry attempts for failed webhook calls
-      retry-delay-ms: 1000  # Initial retry delay (exponential backoff)
+      retry-delay-ms: 1000  # Initial retry delay (exponential backoff: 1s, 2s, 4s, 8s...)
+      max-delay-ms: 30000  # Maximum delay between retries (30s cap)
       timeout-ms: 5000  # Webhook HTTP request timeout
   # Provider routing and failover
   routing:
