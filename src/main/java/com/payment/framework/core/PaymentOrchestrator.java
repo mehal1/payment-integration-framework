@@ -7,6 +7,8 @@ import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
 import com.payment.framework.domain.TransactionStatus;
+import com.payment.framework.persistence.entity.PaymentTransactionEntity;
+import com.payment.framework.persistence.service.PaymentPersistenceService;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -42,6 +44,7 @@ public class PaymentOrchestrator {
     private final RetryRegistry retryRegistry;
     private final ProviderRouter providerRouter;
     private final ProviderPerformanceMetrics metrics;
+    private final PaymentPersistenceService persistenceService;
 
     @Value("${payment.routing.failover.enabled:true}")
     private boolean failoverEnabled;
@@ -214,11 +217,45 @@ public class PaymentOrchestrator {
     /**
      * Actually call the PSP with retries and circuit breaker protection.
      * Each PSP gets its own circuit breaker so one failure doesn't block others.
+     * Includes a final database check right before PSP call to prevent duplicate charges in race conditions.
      */
     private PaymentResult executeWithProvider(
             PaymentRequest request, 
             PSPAdapter adapter, 
             PaymentProviderType providerType) {
+        
+        // Final database check right before PSP call to prevent duplicate charges in race conditions
+        // This handles the case where another thread completed the payment between our idempotency check and PSP call
+        Optional<PaymentTransactionEntity> existingTransaction = persistenceService.getTransaction(request.getIdempotencyKey());
+        if (existingTransaction.isPresent()) {
+            PaymentTransactionEntity entity = existingTransaction.get();
+            log.info("Transaction already exists in database for idempotencyKey={}, status={}. " +
+                    "Returning existing result to prevent duplicate PSP call.",
+                    request.getIdempotencyKey(), entity.getStatus());
+            
+            // Convert entity to PaymentResult
+            PaymentResult existingResult = PaymentResult.builder()
+                    .idempotencyKey(entity.getIdempotencyKey())
+                    .providerTransactionId(entity.getProviderTransactionId())
+                    .status(entity.getStatus())
+                    .amount(entity.getAmount())
+                    .currencyCode(entity.getCurrencyCode())
+                    .failureCode(entity.getFailureCode())
+                    .message(entity.getFailureMessage())
+                    .timestamp(entity.getCreatedAt() != null ? entity.getCreatedAt() : Instant.now())
+                    .metadata(null)
+                    .build();
+            
+            // Cache in Redis for future fast lookups
+            try {
+                idempotencyService.storeResult(request.getIdempotencyKey(), existingResult);
+            } catch (Exception e) {
+                log.warn("Failed to cache existing transaction in Redis for key={}: {}", 
+                        request.getIdempotencyKey(), e.getMessage());
+            }
+            
+            return existingResult;
+        }
         
         // Use PSP adapter name for circuit breaker (per-PSP adapter, not per-provider-type)
         // This allows failover: if Stripe fails, Adyen (also CARD) can still be used

@@ -9,6 +9,7 @@ import com.payment.framework.persistence.repository.PaymentEventRepository;
 import com.payment.framework.persistence.repository.PaymentTransactionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +29,7 @@ public class PaymentPersistenceService {
 
     /**
      * Persists a payment transaction (creates or updates).
+     * Handles duplicate key violations gracefully (idempotency enforced at database level).
      */
     @Transactional
     public void persistTransaction(PaymentRequest request, PaymentResult result) {
@@ -63,6 +65,12 @@ public class PaymentPersistenceService {
             transactionRepository.save(entity);
             log.debug("Persisted payment transaction: idempotencyKey={}, status={}", 
                     request.getIdempotencyKey(), result.getStatus());
+        } catch (DataIntegrityViolationException e) {
+            // Duplicate key violation - another thread/process already persisted this transaction
+            log.warn("Duplicate idempotency key detected (database constraint): idempotencyKey={}. " +
+                    "This is expected in concurrent scenarios. Transaction already exists.", 
+                    request.getIdempotencyKey());
+            // Don't throw - this is idempotent behavior
         } catch (Exception e) {
             log.error("Failed to persist payment transaction: idempotencyKey={}", 
                     request.getIdempotencyKey(), e);
