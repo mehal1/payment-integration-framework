@@ -10,9 +10,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-/**
- * Persistent entity for refund transactions.
- */
+/** JPA entity for the refunds table. */
 @Entity
 @Table(name = "refunds", indexes = {
     @Index(name = "idx_refund_payment_key", columnList = "payment_idempotency_key"),

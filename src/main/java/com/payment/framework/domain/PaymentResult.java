@@ -15,7 +15,6 @@ import java.util.Map;
 @Value
 @Builder
 @JsonDeserialize(builder = PaymentResult.PaymentResultBuilder.class)
-@JsonPOJOBuilder(withPrefix = "")
 public class PaymentResult {
 
     String idempotencyKey;
@@ -46,4 +45,7 @@ public class PaymentResult {
     public boolean isTerminalFailure() {
         return status == TransactionStatus.FAILED || status == TransactionStatus.CANCELLED;
     }
+
+    @JsonPOJOBuilder(withPrefix = "")
+    public static class PaymentResultBuilder {}
 }

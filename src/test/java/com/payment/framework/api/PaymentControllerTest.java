@@ -2,8 +2,11 @@ package com.payment.framework.api;
 
 import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentResult;
+import com.payment.framework.domain.RefundResult;
+import com.payment.framework.domain.RefundStatus;
 import com.payment.framework.domain.TransactionStatus;
 import com.payment.framework.core.PaymentOrchestrator;
+import com.payment.framework.core.RefundOrchestrator;
 import com.payment.framework.core.RequestVelocityService;
 import com.payment.framework.messaging.PaymentEventProducer;
 import com.payment.framework.persistence.service.PaymentPersistenceService;
@@ -40,6 +43,9 @@ class PaymentControllerTest {
 
     @MockitoBean
     private PaymentPersistenceService persistenceService;
+
+    @MockitoBean
+    private RefundOrchestrator refundOrchestrator;
 
     @MockitoBean
     private RequestVelocityService requestVelocityService;
@@ -95,5 +101,101 @@ class PaymentControllerTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void refundReturnsOkOnSuccess() throws Exception {
+        RefundResult refundResult = RefundResult.builder()
+                .idempotencyKey("refund-1")
+                .paymentIdempotencyKey("pay-1")
+                .providerRefundId("prov-refund-1")
+                .status(RefundStatus.SUCCESS)
+                .amount(new BigDecimal("50.00"))
+                .currencyCode("USD")
+                .message("Refund processed")
+                .timestamp(Instant.now())
+                .build();
+        when(refundOrchestrator.execute(any())).thenReturn(refundResult);
+
+        mockMvc.perform(post("/api/v1/payments/refund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "idempotencyKey": "refund-1",
+                                  "paymentIdempotencyKey": "pay-1",
+                                  "amount": 50.00,
+                                  "currencyCode": "USD",
+                                  "reason": "customer request"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.idempotencyKey").value("refund-1"))
+                .andExpect(jsonPath("$.paymentIdempotencyKey").value("pay-1"))
+                .andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.amount").value(50.0))
+                .andExpect(jsonPath("$.currencyCode").value("USD"));
+    }
+
+    @Test
+    void refundReturnsBadRequestWhenValidationFails() throws Exception {
+        when(refundOrchestrator.execute(any()))
+                .thenThrow(new IllegalArgumentException("Payment not found: pay-missing"));
+
+        mockMvc.perform(post("/api/v1/payments/refund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "idempotencyKey": "refund-2",
+                                  "paymentIdempotencyKey": "pay-missing",
+                                  "currencyCode": "USD"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureCode").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.message").value("Payment not found: pay-missing"));
+    }
+
+    @Test
+    void refundReturnsBadRequestWhenMissingRequiredFields() throws Exception {
+        mockMvc.perform(post("/api/v1/payments/refund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "idempotencyKey": "",
+                                  "paymentIdempotencyKey": "pay-1",
+                                  "currencyCode": "USD"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void refundReturnsFailedStatusForDeclinedRefund() throws Exception {
+        RefundResult failedResult = RefundResult.builder()
+                .idempotencyKey("refund-3")
+                .paymentIdempotencyKey("pay-1")
+                .status(RefundStatus.FAILED)
+                .amount(new BigDecimal("200.00"))
+                .currencyCode("USD")
+                .failureCode("REFUND_AMOUNT_EXCEEDED")
+                .message("Refund amount exceeds original payment amount")
+                .timestamp(Instant.now())
+                .build();
+        when(refundOrchestrator.execute(any())).thenReturn(failedResult);
+
+        mockMvc.perform(post("/api/v1/payments/refund")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "idempotencyKey": "refund-3",
+                                  "paymentIdempotencyKey": "pay-1",
+                                  "amount": 200.00,
+                                  "currencyCode": "USD"
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureCode").value("REFUND_AMOUNT_EXCEEDED"));
     }
 }

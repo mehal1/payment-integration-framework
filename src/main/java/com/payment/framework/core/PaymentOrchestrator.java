@@ -61,7 +61,6 @@ public class PaymentOrchestrator {
         if (adapters.isEmpty()) {
             log.warn("No PSP adapters found! Make sure adapters are annotated with @Component and implement PSPAdapter");
         }
-        // Multiple adapters can share a type (e.g. MockStripe + MockAdyen both CARD); keep first for getAdapter(type).
         adapterByType = adapters.stream()
                 .collect(Collectors.toMap(PSPAdapter::getProviderType, a -> a, (first, second) -> first));
         log.info("Registered PSP adapters: {}", adapterByType.keySet());
@@ -184,9 +183,7 @@ public class PaymentOrchestrator {
                 log.info("Payment executed successfully with provider={} (attempt={}, latency={}ms)",
                         providerType, attempt + 1, latencyMs);
                 
-                // Add adapter info to metadata for refund tracking
                 PaymentResult resultWithMetadata = addAdapterMetadata(result, adapter, providerType);
-                
                 return resultWithMetadata;
 
             } catch (CallNotPermittedException e) {
@@ -207,7 +204,6 @@ public class PaymentOrchestrator {
                 if (!failoverEnabled || attempt >= maxFailoverAttempts - 1) {
                     break;
                 }
-                // Continue to next provider
             } finally {
                 metrics.decrementActiveConnections(providerType);
             }
@@ -219,17 +215,14 @@ public class PaymentOrchestrator {
     }
 
     /**
-     * Actually call the PSP with retries and circuit breaker protection.
-     * Each PSP gets its own circuit breaker so one failure doesn't block others.
-     * Includes a final database check right before PSP call to prevent duplicate charges in race conditions.
+     * Calls the PSP with retry + circuit breaker. Does a final DB check to prevent
+     * duplicate charges if another thread completed the same payment concurrently.
      */
     private PaymentResult executeWithProvider(
             PaymentRequest request, 
             PSPAdapter adapter, 
             PaymentProviderType providerType) {
         
-        // Final database check right before PSP call to prevent duplicate charges in race conditions
-        // This handles the case where another thread completed the payment between our idempotency check and PSP call
         Optional<PaymentTransactionEntity> existingTransaction = persistenceService.getTransaction(request.getIdempotencyKey());
         if (existingTransaction.isPresent()) {
             PaymentTransactionEntity entity = existingTransaction.get();
@@ -237,7 +230,6 @@ public class PaymentOrchestrator {
                     "Returning existing result to prevent duplicate PSP call.",
                     request.getIdempotencyKey(), entity.getStatus());
             
-            // Convert entity to PaymentResult
             PaymentResult existingResult = PaymentResult.builder()
                     .idempotencyKey(entity.getIdempotencyKey())
                     .providerTransactionId(entity.getProviderTransactionId())
@@ -250,19 +242,15 @@ public class PaymentOrchestrator {
                     .metadata(null)
                     .build();
             
-            // Cache in Redis for future fast lookups
             try {
                 idempotencyService.storeResult(request.getIdempotencyKey(), existingResult);
             } catch (Exception e) {
                 log.warn("Failed to cache existing transaction in Redis for key={}: {}", 
                         request.getIdempotencyKey(), e.getMessage());
             }
-            
             return existingResult;
         }
         
-        // Use PSP adapter name for circuit breaker (per-PSP adapter, not per-provider-type)
-        // This allows failover: if Stripe fails, Adyen (also CARD) can still be used
         String pspAdapterName = adapter.getPSPAdapterName();
         CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker(pspAdapterName);
         Retry retry = retryRegistry.retry(RETRY_INSTANCE);
@@ -273,9 +261,6 @@ public class PaymentOrchestrator {
         return withCb.get();
     }
 
-    /**
-     * Extract cost from payment result metadata (if available).
-     */
     private BigDecimal extractCost(PaymentResult result) {
         if (result.getMetadata() != null && result.getMetadata().containsKey("cost")) {
             Object costObj = result.getMetadata().get("cost");
@@ -292,18 +277,13 @@ public class PaymentOrchestrator {
         return Optional.ofNullable(adapterByType.get(type));
     }
 
-    /**
-     * Get adapter by name (for refunds - to find the adapter that processed original payment).
-     */
     public Optional<PSPAdapter> getAdapterByName(String adapterName) {
         return adapters.stream()
                 .filter(adapter -> adapter.getPSPAdapterName().equals(adapterName))
                 .findFirst();
     }
 
-    /**
-     * Add adapter metadata to payment result for refund tracking.
-     */
+    /** Attaches adapter name and provider type to result metadata so refunds can find the same PSP. */
     private PaymentResult addAdapterMetadata(PaymentResult result, PSPAdapter adapter, PaymentProviderType providerType) {
         Map<String, Object> metadata = result.getMetadata() != null 
                 ? new HashMap<>(result.getMetadata())
@@ -347,7 +327,6 @@ public class PaymentOrchestrator {
                     .metadata(null)
                     .build();
             
-            // Validate the result was built correctly
             if (result.getIdempotencyKey() == null || result.getStatus() == null || result.getAmount() == null) {
                 log.error("buildFailureResult created invalid result: idempotencyKey={}, status={}, amount={}, failureCode={}, message={}", 
                         result.getIdempotencyKey(), result.getStatus(), result.getAmount(), result.getFailureCode(), result.getMessage());

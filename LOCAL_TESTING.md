@@ -62,7 +62,46 @@ curl -X POST http://localhost:8080/api/v1/payments/execute \
   }'
 ```
 
-### 5. View Risk Alerts
+### 5. Test Refund
+
+**Full refund** (omit `amount` to refund the entire payment):
+```bash
+curl -X POST http://localhost:8080/api/v1/payments/refund \
+  -H "Content-Type: application/json" \
+  -d '{
+    "idempotencyKey": "refund-1",
+    "paymentIdempotencyKey": "test-2",
+    "currencyCode": "USD",
+    "reason": "Customer requested"
+  }'
+```
+
+**Partial refunds** (make a fresh payment, then refund in parts):
+```bash
+# Payment of $100
+curl -X POST http://localhost:8080/api/v1/payments/execute \
+  -H "Content-Type: application/json" \
+  -d '{"idempotencyKey":"pay-partial-1","providerType":"CARD","amount":100.00,"currencyCode":"USD","merchantReference":"order-partial"}'
+
+# Partial refund: $30
+curl -X POST http://localhost:8080/api/v1/payments/refund \
+  -H "Content-Type: application/json" \
+  -d '{"idempotencyKey":"refund-p1","paymentIdempotencyKey":"pay-partial-1","amount":30.00,"currencyCode":"USD","reason":"Partial return"}'
+
+# Partial refund: $50
+curl -X POST http://localhost:8080/api/v1/payments/refund \
+  -H "Content-Type: application/json" \
+  -d '{"idempotencyKey":"refund-p2","paymentIdempotencyKey":"pay-partial-1","amount":50.00,"currencyCode":"USD","reason":"Second return"}'
+
+# This should FAIL — only $20 remaining
+curl -X POST http://localhost:8080/api/v1/payments/refund \
+  -H "Content-Type: application/json" \
+  -d '{"idempotencyKey":"refund-p3","paymentIdempotencyKey":"pay-partial-1","amount":30.00,"currencyCode":"USD","reason":"Should fail"}'
+```
+
+Expected: First two succeed (status `SUCCESS`), third returns status `FAILED` with `failureCode: REFUND_LIMIT_EXCEEDED` and message showing "Already refunded: 80.00, Remaining: 20.00".
+
+### 6. View Risk Alerts
 
 **Option A: Trigger alerts** (via payment events - uses ML scoring if ML service is enabled, otherwise falls back to rule-based scoring):
 ```bash
@@ -79,7 +118,7 @@ curl http://localhost:8080/api/v1/risk/alerts?limit=10
 **Option B: View via Swagger UI**:
 Open http://localhost:8080/swagger-ui/index.html and use the `/api/v1/risk/alerts` endpoint
 
-### 6. View API Documentation
+### 7. View API Documentation
 
 Open Swagger UI: http://localhost:8080/swagger-ui/index.html
 

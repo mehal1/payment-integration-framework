@@ -11,10 +11,7 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.Instant;
 
-/**
- * Persistent entity for payment transactions.
- * Stores all payment attempts for compliance, reconciliation, and analytics.
- */
+/** JPA entity for the payment_transactions table. */
 @Entity
 @Table(name = "payment_transactions", indexes = {
     @Index(name = "idx_payment_merchant_ref", columnList = "merchant_reference"),
@@ -67,7 +64,7 @@ public class PaymentTransactionEntity {
     @Column(name = "correlation_id")
     private String correlationId;
 
-    /** PSP adapter that processed this payment (e.g. MockStripeAdapter). Used for refund routing. */
+    /** Which PSP adapter processed this payment; used to route refunds to the same adapter. */
     @Column(name = "adapter_name")
     private String adapterName;
 

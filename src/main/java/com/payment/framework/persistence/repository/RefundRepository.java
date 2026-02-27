@@ -9,13 +9,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Repository for refund transactions.
- */
+/** Spring Data repository for refund transactions. */
 @Repository
 public interface RefundRepository extends JpaRepository<RefundEntity, String> {
 

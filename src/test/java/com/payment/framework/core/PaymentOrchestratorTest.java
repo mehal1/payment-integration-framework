@@ -53,6 +53,8 @@ class PaymentOrchestratorTest {
 	private ProviderRouter providerRouter;
 	@Mock
 	private ProviderPerformanceMetrics metrics;
+	@Mock
+	private com.payment.framework.persistence.service.PaymentPersistenceService persistenceService;
 
 	private PaymentOrchestrator orchestrator;
 
@@ -80,7 +82,8 @@ class PaymentOrchestratorTest {
 				circuitBreakerRegistry,
 				retryRegistry,
 				providerRouter,
-				metrics
+				metrics,
+				persistenceService
 		);
 		// Set @Value fields using reflection (they're not injected in unit tests)
 		try {

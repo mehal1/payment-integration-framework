@@ -15,9 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Prevents duplicate charges by caching payment results.
- * If someone retries the same payment, we return the cached result instead of charging again.
- * Uses Redis for fast lookups and database as persistent fallback.
+ * Prevents duplicate charges using Redis (fast) with PostgreSQL fallback (persistent).
  */
 @Slf4j
 @Service
@@ -30,13 +28,7 @@ public class IdempotencyService {
     private final RedisTemplate<String, PaymentResult> redisTemplate;
     private final PaymentTransactionRepository transactionRepository;
 
-    /**
-     * Check if we've seen this payment before.
-     * First checks Redis (fast), then database (persistent fallback).
-     * If both are unavailable, returns empty (fail-open behavior).
-     */
     public Optional<PaymentResult> getCachedResult(String idempotencyKey) {
-        // Try Redis first (fast path)
         String key = KEY_PREFIX + idempotencyKey;
         try {
             PaymentResult cached = redisTemplate.opsForValue().get(key);
@@ -55,7 +47,6 @@ public class IdempotencyService {
             }
         }
 
-        // Fallback to database (persistent source of truth)
         try {
             Optional<PaymentTransactionEntity> entityOpt = transactionRepository.findByIdempotencyKey(idempotencyKey);
             if (entityOpt.isPresent()) {
@@ -63,7 +54,6 @@ public class IdempotencyService {
                 PaymentResult result = convertEntityToResult(entity);
                 log.debug("Idempotency hit in database for key={}, status={}", idempotencyKey, result.getStatus());
                 
-                // Cache in Redis for future fast lookups
                 try {
                     storeResult(idempotencyKey, result);
                 } catch (Exception e) {
@@ -74,15 +64,11 @@ public class IdempotencyService {
             }
         } catch (Exception e) {
             log.error("Database idempotency check failed for key={}: {}", idempotencyKey, e.getMessage());
-            // Fail-open: if database is down, proceed with payment
         }
 
         return Optional.empty();
     }
 
-    /**
-     * Converts PaymentTransactionEntity to PaymentResult for idempotency checks.
-     */
     private PaymentResult convertEntityToResult(PaymentTransactionEntity entity) {
         Map<String, Object> metadata = new HashMap<>();
         if (entity.getAdapterName() != null) {

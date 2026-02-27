@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.util.Map;
 
 /**
- * REST API response for a refund operation.
+ * Response body for POST /api/v1/payments/refund.
  */
 @Value
 @Builder

@@ -18,7 +18,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Handles refund execution with idempotency and PSP routing.
+ * Orchestrates refund processing: idempotency checks, cumulative amount validation,
+ * PSP adapter resolution, and refund execution.
  */
 @Slf4j
 @Service
@@ -30,9 +31,6 @@ public class RefundOrchestrator {
     private final PaymentPersistenceService persistenceService;
     private final RefundRepository refundRepository;
 
-    /**
-     * Process a refund - checks idempotency, validates payment, and executes refund.
-     */
     public RefundResult execute(RefundRequest request) {
         String refundIdempotencyKey = request.getIdempotencyKey();
         String paymentIdempotencyKey = request.getPaymentIdempotencyKey();
@@ -40,28 +38,23 @@ public class RefundOrchestrator {
         log.info("Executing refund: refundIdempotencyKey={}, paymentIdempotencyKey={}, amount={}",
                 refundIdempotencyKey, paymentIdempotencyKey, request.getAmount());
 
-        // Check refund idempotency (separate from payment idempotency)
         try {
             Optional<RefundResult> cachedRefund = getCachedRefund(refundIdempotencyKey);
             if (cachedRefund.isPresent()) {
-                RefundResult cached = cachedRefund.get();
-                log.info("Returning cached refund result for refundIdempotencyKey={}, status={}",
-                        refundIdempotencyKey, cached.getStatus());
-                return cached;
+                log.info("Returning existing refund for refundIdempotencyKey={}, status={}",
+                        refundIdempotencyKey, cachedRefund.get().getStatus());
+                return cachedRefund.get();
             }
         } catch (Exception e) {
             log.error("Error checking refund idempotency for refundIdempotencyKey={}", refundIdempotencyKey, e);
         }
 
-        // Validate original payment exists and is refundable
         PaymentResult originalPayment = validateAndGetPayment(paymentIdempotencyKey);
 
-        // Determine refund amount (use full payment amount if not specified)
         BigDecimal refundAmount = request.getAmount() != null
                 ? request.getAmount()
                 : originalPayment.getAmount();
 
-        // Validate refund amount doesn't exceed payment amount (single refund check)
         if (refundAmount.compareTo(originalPayment.getAmount()) > 0) {
             log.error("Refund amount {} exceeds payment amount {} for paymentIdempotencyKey={}",
                     refundAmount, originalPayment.getAmount(), paymentIdempotencyKey);
@@ -71,8 +64,7 @@ public class RefundOrchestrator {
             return failureResult;
         }
 
-        // Validate cumulative refunds don't exceed payment amount
-        // Check total already refunded (sum of all successful refunds for this payment)
+        // Cumulative check: sum of all successful refunds must not exceed original payment
         BigDecimal totalRefunded = refundRepository.sumRefundedAmountByPayment(
                 paymentIdempotencyKey, RefundStatus.SUCCESS);
         if (totalRefunded == null) {
@@ -82,25 +74,32 @@ public class RefundOrchestrator {
         BigDecimal totalAfterRefund = totalRefunded.add(refundAmount);
         if (totalAfterRefund.compareTo(originalPayment.getAmount()) > 0) {
             BigDecimal remainingRefundable = originalPayment.getAmount().subtract(totalRefunded);
-            log.error("Refund would exceed payment limit. Payment amount: {}, Already refunded: {}, " +
-                            "Requested refund: {}, Remaining refundable: {} for paymentIdempotencyKey={}",
+            log.error("Cumulative refund would exceed payment. amount={}, alreadyRefunded={}, requested={}, remaining={}, paymentKey={}",
                     originalPayment.getAmount(), totalRefunded, refundAmount, remainingRefundable, paymentIdempotencyKey);
             RefundResult failureResult = buildFailureResult(request, "REFUND_LIMIT_EXCEEDED",
-                    String.format("Refund would exceed payment limit. Already refunded: %s, Remaining refundable: %s",
+                    String.format("Cumulative refund limit exceeded. Already refunded: %s, Remaining: %s",
                             totalRefunded, remainingRefundable));
             storeRefundResult(refundIdempotencyKey, failureResult);
             return failureResult;
         }
 
-        // Get the PSP adapter that processed the original payment
-        // We need to find which adapter was used for the original payment
-        // For now, we'll try to get adapter from payment result metadata or use a default approach
+        // Build request with resolved amount so adapters always receive a non-null amount
+        RefundRequest resolvedRequest = RefundRequest.builder()
+                .idempotencyKey(request.getIdempotencyKey())
+                .paymentIdempotencyKey(request.getPaymentIdempotencyKey())
+                .amount(refundAmount)
+                .currencyCode(request.getCurrencyCode())
+                .reason(request.getReason())
+                .merchantReference(request.getMerchantReference())
+                .correlationId(request.getCorrelationId())
+                .build();
+
         Optional<PSPAdapter> adapterOpt = findAdapterForPayment(originalPayment);
 
         if (adapterOpt.isEmpty()) {
-            log.error("Cannot find PSP adapter for refund. Original payment providerTransactionId={}",
+            log.error("No PSP adapter found for refund. providerTransactionId={}",
                     originalPayment.getProviderTransactionId());
-            RefundResult failureResult = buildFailureResult(request, "ADAPTER_NOT_FOUND",
+            RefundResult failureResult = buildFailureResult(resolvedRequest, "ADAPTER_NOT_FOUND",
                     "Cannot find PSP adapter for original payment");
             storeRefundResult(refundIdempotencyKey, failureResult);
             return failureResult;
@@ -108,18 +107,16 @@ public class RefundOrchestrator {
 
         PSPAdapter adapter = adapterOpt.get();
 
-        // Check if adapter supports refunds
-        if (adapter.refund(request).isEmpty()) {
+        if (adapter.refund(resolvedRequest).isEmpty()) {
             log.error("PSP adapter {} does not support refunds", adapter.getPSPAdapterName());
-            RefundResult failureResult = buildFailureResult(request, "REFUND_NOT_SUPPORTED",
+            RefundResult failureResult = buildFailureResult(resolvedRequest, "REFUND_NOT_SUPPORTED",
                     "PSP adapter does not support refunds");
             storeRefundResult(refundIdempotencyKey, failureResult);
             return failureResult;
         }
 
-        // Execute refund
         try {
-            RefundResult result = adapter.refund(request).orElseThrow(() ->
+            RefundResult result = adapter.refund(resolvedRequest).orElseThrow(() ->
                     new IllegalStateException("Adapter returned empty refund result"));
 
             if (result == null || result.getStatus() == null) {
@@ -130,26 +127,25 @@ public class RefundOrchestrator {
                 return failureResult;
             }
 
-            log.info("Refund executed successfully: refundIdempotencyKey={}, status={}, providerRefundId={}",
+            log.info("Refund executed: refundIdempotencyKey={}, status={}, providerRefundId={}",
                     refundIdempotencyKey, result.getStatus(), result.getProviderRefundId());
 
-            // Store refund result for idempotency
             storeRefundResult(refundIdempotencyKey, result);
-
             return result;
 
         } catch (Exception e) {
             log.error("Refund execution failed for refundIdempotencyKey={}", refundIdempotencyKey, e);
-            RefundResult failureResult = buildFailureResult(request, "REFUND_EXECUTION_FAILED",
-                    "Refund execution failed: " + e.getMessage());
+            String errorMsg = e.getMessage();
+            if (errorMsg != null && errorMsg.length() > 900) {
+                errorMsg = errorMsg.substring(0, 900);
+            }
+            RefundResult failureResult = buildFailureResult(resolvedRequest, "REFUND_EXECUTION_FAILED",
+                    "Refund execution failed: " + errorMsg);
             storeRefundResult(refundIdempotencyKey, failureResult);
             return failureResult;
         }
     }
 
-    /**
-     * Check refund idempotency cache (database lookup).
-     */
     private Optional<RefundResult> getCachedRefund(String refundIdempotencyKey) {
         return persistenceService.getRefund(refundIdempotencyKey)
                 .map(entity -> RefundResult.builder()
@@ -166,19 +162,14 @@ public class RefundOrchestrator {
                         .build());
     }
 
-    /**
-     * Store refund result for idempotency.
-     */
     private void storeRefundResult(String refundIdempotencyKey, RefundResult result) {
-        // Store in database (idempotency handled at DB level)
         persistenceService.persistRefund(refundIdempotencyKey, result);
     }
 
     /**
-     * Validate payment exists and is refundable.
+     * Looks up original payment from Redis or database. Throws if not found or not refundable.
      */
     private PaymentResult validateAndGetPayment(String paymentIdempotencyKey) {
-        // Check idempotency cache first
         Optional<PaymentResult> cachedPayment = idempotencyService.getCachedResult(paymentIdempotencyKey);
         if (cachedPayment.isPresent()) {
             PaymentResult payment = cachedPayment.get();
@@ -186,7 +177,6 @@ public class RefundOrchestrator {
             return payment;
         }
 
-        // Check database
         Optional<com.payment.framework.persistence.entity.PaymentTransactionEntity> entityOpt =
                 persistenceService.getTransaction(paymentIdempotencyKey);
 
@@ -220,9 +210,6 @@ public class RefundOrchestrator {
         return payment;
     }
 
-    /**
-     * Validate that payment can be refunded.
-     */
     private void validatePaymentRefundable(PaymentResult payment) {
         if (!payment.isSuccess()) {
             throw new IllegalArgumentException("Cannot refund failed payment: " + payment.getStatus());
@@ -233,19 +220,15 @@ public class RefundOrchestrator {
     }
 
     /**
-     * Find the PSP adapter that processed the original payment.
-     * Uses adapter name stored in payment metadata.
+     * Resolves the PSP adapter that handled the original payment using adapter_name from metadata/DB.
+     * Falls back to providerType if adapter name is unavailable.
      */
     private Optional<PSPAdapter> findAdapterForPayment(PaymentResult payment) {
-        // Get adapter name from payment metadata (stored during payment execution)
         if (payment.getMetadata() != null && payment.getMetadata().containsKey("adapterName")) {
             String adapterName = payment.getMetadata().get("adapterName").toString();
-            // Find adapter by name from PaymentOrchestrator
             return paymentOrchestrator.getAdapterByName(adapterName);
         }
         
-        // Fallback: try to get adapter by provider type
-        // This is less reliable but works if metadata is missing
         com.payment.framework.domain.PaymentProviderType providerType = 
                 payment.getMetadata() != null && payment.getMetadata().containsKey("providerType")
                         ? com.payment.framework.domain.PaymentProviderType.valueOf(
@@ -255,9 +238,6 @@ public class RefundOrchestrator {
         return paymentOrchestrator.getAdapter(providerType);
     }
 
-    /**
-     * Build failure refund result.
-     */
     private RefundResult buildFailureResult(RefundRequest request, String failureCode, String message) {
         return RefundResult.builder()
                 .idempotencyKey(request.getIdempotencyKey())

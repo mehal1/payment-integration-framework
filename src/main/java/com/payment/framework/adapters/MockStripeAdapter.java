@@ -70,7 +70,6 @@ public class MockStripeAdapter implements PSPAdapter {
         log.debug("MockStripeAdapter refunding refundIdempotencyKey={}, paymentIdempotencyKey={}, amount={}",
                 request.getIdempotencyKey(), request.getPaymentIdempotencyKey(), request.getAmount());
 
-        // Simulate successful refund
         return java.util.Optional.of(RefundResult.builder()
                 .idempotencyKey(request.getIdempotencyKey())
                 .paymentIdempotencyKey(request.getPaymentIdempotencyKey())

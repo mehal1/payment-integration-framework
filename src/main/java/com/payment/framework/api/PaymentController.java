@@ -25,9 +25,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.UUID;
 
 /**
- * REST API for submitting payments through the framework. All requests are
- * idempotent when the same idempotencyKey is sent; events are published
- * to Kafka for audit and downstream processing.
+ * REST API for payment and refund operations.
  */
 @Slf4j
 @RestController
@@ -78,7 +76,6 @@ public class PaymentController {
                 .correlationId(correlationId)
                 .build();
 
-        // Velocity check at ingestion: how many requests from this email/IP in last 60s
         RequestVelocityService.VelocitySnapshot velocity = requestVelocityService.recordAndCheck(request.getEmail(), clientIp);
         if (velocity.isOverThreshold()) {
             log.warn("Request velocity over threshold: idempotencyKey={} emailCount={} ipCount={}",
@@ -97,9 +94,7 @@ public class PaymentController {
         log.debug("Payment execution completed: idempotencyKey={}, status={}, providerTransactionId={}", 
                 result.getIdempotencyKey(), result.getStatus(), result.getProviderTransactionId());
         
-        // Persist transaction to database
         persistenceService.persistTransaction(request, result);
-        
         eventProducer.publishResult(request, result);
 
         return ResponseEntity.ok(PaymentResponseDto.from(result));
@@ -147,7 +142,14 @@ public class PaymentController {
         } catch (IllegalArgumentException e) {
             log.warn("Refund validation failed: refundIdempotencyKey={}, error={}", 
                     request.getIdempotencyKey(), e.getMessage());
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(RefundResponseDto.builder()
+                    .idempotencyKey(request.getIdempotencyKey())
+                    .paymentIdempotencyKey(request.getPaymentIdempotencyKey())
+                    .status(com.payment.framework.domain.RefundStatus.FAILED)
+                    .failureCode("VALIDATION_FAILED")
+                    .message(e.getMessage())
+                    .timestamp(java.time.Instant.now())
+                    .build());
         } catch (Exception e) {
             log.error("Refund execution failed: refundIdempotencyKey={}", request.getIdempotencyKey(), e);
             throw e;
