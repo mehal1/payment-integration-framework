@@ -1,9 +1,12 @@
 package com.payment.framework.api;
 
 import com.payment.framework.core.PaymentOrchestrator;
+import com.payment.framework.core.RefundOrchestrator;
 import com.payment.framework.core.RequestVelocityService;
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
+import com.payment.framework.domain.RefundRequest;
+import com.payment.framework.domain.RefundResult;
 import com.payment.framework.messaging.PaymentEventProducer;
 import com.payment.framework.persistence.service.PaymentPersistenceService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -34,6 +37,7 @@ import java.util.UUID;
 public class PaymentController {
 
     private final PaymentOrchestrator orchestrator;
+    private final RefundOrchestrator refundOrchestrator;
     private final PaymentEventProducer eventProducer;
     private final PaymentPersistenceService persistenceService;
     private final RequestVelocityService requestVelocityService;
@@ -99,6 +103,55 @@ public class PaymentController {
         eventProducer.publishResult(request, result);
 
         return ResponseEntity.ok(PaymentResponseDto.from(result));
+    }
+
+    @PostMapping("/refund")
+    @Operation(
+            summary = "Refund a payment",
+            description = "Refund a previously successful payment. Supports full and partial refunds. " +
+                    "Use idempotencyKey for safe retries. On success returns 200 with status SUCCESS or PENDING; " +
+                    "on failure returns 200 with status FAILED and failureCode/message.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Refund processed. Check body.status: SUCCESS/PENDING or FAILED (with failureCode/message).",
+                    content = @Content(mediaType = "application/json", schema = @Schema(implementation = RefundResponseDto.class))),
+            @ApiResponse(responseCode = "400", description = "Validation failed or payment not found/not refundable. Body: { \"error\": \"VALIDATION_FAILED\"|\"BAD_REQUEST\", \"message\": ... }"),
+            @ApiResponse(responseCode = "500", description = "Internal error. Body: { \"error\": \"INTERNAL_ERROR\", \"message\": \"...\" }")
+    })
+    public ResponseEntity<RefundResponseDto> refund(@Valid @RequestBody RefundRequestDto dto) {
+        String correlationId = UUID.randomUUID().toString();
+        
+        RefundRequest request = RefundRequest.builder()
+                .idempotencyKey(dto.getIdempotencyKey())
+                .paymentIdempotencyKey(dto.getPaymentIdempotencyKey())
+                .amount(dto.getAmount())
+                .currencyCode(dto.getCurrencyCode())
+                .reason(dto.getReason())
+                .merchantReference(dto.getMerchantReference())
+                .correlationId(correlationId)
+                .build();
+
+        try {
+            RefundResult result = refundOrchestrator.execute(request);
+            
+            if (result == null) {
+                log.error("RefundOrchestrator.execute() returned null for refundIdempotencyKey={}", 
+                        request.getIdempotencyKey());
+                throw new IllegalStateException("Refund execution returned null result");
+            }
+            
+            log.debug("Refund execution completed: refundIdempotencyKey={}, status={}, providerRefundId={}", 
+                    result.getIdempotencyKey(), result.getStatus(), result.getProviderRefundId());
+            
+            return ResponseEntity.ok(RefundResponseDto.from(result));
+            
+        } catch (IllegalArgumentException e) {
+            log.warn("Refund validation failed: refundIdempotencyKey={}, error={}", 
+                    request.getIdempotencyKey(), e.getMessage());
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            log.error("Refund execution failed: refundIdempotencyKey={}", request.getIdempotencyKey(), e);
+            throw e;
+        }
     }
 
     private static String getClientIp(HttpServletRequest request) {

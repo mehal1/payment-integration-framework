@@ -2,11 +2,14 @@ package com.payment.framework.persistence.service;
 
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
+import com.payment.framework.domain.RefundResult;
 import com.payment.framework.messaging.PaymentEvent;
 import com.payment.framework.persistence.entity.PaymentEventEntity;
 import com.payment.framework.persistence.entity.PaymentTransactionEntity;
+import com.payment.framework.persistence.entity.RefundEntity;
 import com.payment.framework.persistence.repository.PaymentEventRepository;
 import com.payment.framework.persistence.repository.PaymentTransactionRepository;
+import com.payment.framework.persistence.repository.RefundRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -26,6 +29,7 @@ public class PaymentPersistenceService {
 
     private final PaymentTransactionRepository transactionRepository;
     private final PaymentEventRepository eventRepository;
+    private final RefundRepository refundRepository;
 
     /**
      * Persists a payment transaction (creates or updates).
@@ -46,6 +50,11 @@ public class PaymentPersistenceService {
                 entity.setFailureMessage(result.getMessage());
                 entity.setUpdatedAt(Instant.now());
             } else {
+                // Extract adapter name from payment result metadata (stored by PaymentOrchestrator)
+                String adapterName = result.getMetadata() != null && result.getMetadata().containsKey("adapterName")
+                        ? result.getMetadata().get("adapterName").toString()
+                        : null;
+
                 // Create new transaction
                 entity = PaymentTransactionEntity.builder()
                         .idempotencyKey(request.getIdempotencyKey())
@@ -59,6 +68,7 @@ public class PaymentPersistenceService {
                         .failureCode(result.getFailureCode())
                         .failureMessage(result.getMessage())
                         .correlationId(request.getCorrelationId())
+                        .adapterName(adapterName)
                         .build();
             }
             
@@ -113,6 +123,7 @@ public class PaymentPersistenceService {
     /**
      * Checks if a transaction exists by idempotency key.
      */
+    @Transactional(readOnly = true)
     public boolean transactionExists(String idempotencyKey) {
         return transactionRepository.findByIdempotencyKey(idempotencyKey).isPresent();
     }
@@ -120,7 +131,61 @@ public class PaymentPersistenceService {
     /**
      * Retrieves a transaction by idempotency key.
      */
+    @Transactional(readOnly = true)
     public Optional<PaymentTransactionEntity> getTransaction(String idempotencyKey) {
         return transactionRepository.findByIdempotencyKey(idempotencyKey);
+    }
+
+    /**
+     * Persists a refund transaction.
+     */
+    @Transactional
+    public void persistRefund(String refundIdempotencyKey, RefundResult result) {
+        try {
+            Optional<RefundEntity> existingOpt = refundRepository.findByRefundIdempotencyKey(refundIdempotencyKey);
+
+            RefundEntity entity;
+            if (existingOpt.isPresent()) {
+                entity = existingOpt.get();
+                // Update existing refund
+                entity.setStatus(result.getStatus());
+                entity.setProviderRefundId(result.getProviderRefundId());
+                entity.setFailureCode(result.getFailureCode());
+                entity.setFailureMessage(result.getMessage());
+                entity.setUpdatedAt(Instant.now());
+            } else {
+                // Create new refund
+                entity = RefundEntity.builder()
+                        .refundIdempotencyKey(refundIdempotencyKey)
+                        .paymentIdempotencyKey(result.getPaymentIdempotencyKey())
+                        .providerRefundId(result.getProviderRefundId())
+                        .status(result.getStatus())
+                        .amount(result.getAmount())
+                        .currencyCode(result.getCurrencyCode())
+                        .failureCode(result.getFailureCode())
+                        .failureMessage(result.getMessage())
+                        .correlationId(result.getMetadata() != null && result.getMetadata().containsKey("correlationId")
+                                ? result.getMetadata().get("correlationId").toString()
+                                : null)
+                        .build();
+            }
+
+            refundRepository.save(entity);
+            log.debug("Persisted refund: refundIdempotencyKey={}, status={}",
+                    refundIdempotencyKey, result.getStatus());
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Duplicate refund idempotency key detected: refundIdempotencyKey={}. " +
+                    "This is expected in concurrent scenarios.", refundIdempotencyKey);
+        } catch (Exception e) {
+            log.error("Failed to persist refund: refundIdempotencyKey={}", refundIdempotencyKey, e);
+        }
+    }
+
+    /**
+     * Retrieves a refund by idempotency key.
+     */
+    @Transactional(readOnly = true)
+    public Optional<RefundEntity> getRefund(String refundIdempotencyKey) {
+        return refundRepository.findByRefundIdempotencyKey(refundIdempotencyKey);
     }
 }

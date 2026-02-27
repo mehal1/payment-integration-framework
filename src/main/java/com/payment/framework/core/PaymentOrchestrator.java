@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -183,7 +184,10 @@ public class PaymentOrchestrator {
                 log.info("Payment executed successfully with provider={} (attempt={}, latency={}ms)",
                         providerType, attempt + 1, latencyMs);
                 
-                return result;
+                // Add adapter info to metadata for refund tracking
+                PaymentResult resultWithMetadata = addAdapterMetadata(result, adapter, providerType);
+                
+                return resultWithMetadata;
 
             } catch (CallNotPermittedException e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
@@ -286,6 +290,44 @@ public class PaymentOrchestrator {
 
     public Optional<PSPAdapter> getAdapter(PaymentProviderType type) {
         return Optional.ofNullable(adapterByType.get(type));
+    }
+
+    /**
+     * Get adapter by name (for refunds - to find the adapter that processed original payment).
+     */
+    public Optional<PSPAdapter> getAdapterByName(String adapterName) {
+        return adapters.stream()
+                .filter(adapter -> adapter.getPSPAdapterName().equals(adapterName))
+                .findFirst();
+    }
+
+    /**
+     * Add adapter metadata to payment result for refund tracking.
+     */
+    private PaymentResult addAdapterMetadata(PaymentResult result, PSPAdapter adapter, PaymentProviderType providerType) {
+        Map<String, Object> metadata = result.getMetadata() != null 
+                ? new HashMap<>(result.getMetadata())
+                : new HashMap<>();
+        
+        metadata.put("adapterName", adapter.getPSPAdapterName());
+        metadata.put("providerType", providerType.name());
+        
+        return PaymentResult.builder()
+                .idempotencyKey(result.getIdempotencyKey())
+                .providerTransactionId(result.getProviderTransactionId())
+                .status(result.getStatus())
+                .amount(result.getAmount())
+                .currencyCode(result.getCurrencyCode())
+                .failureCode(result.getFailureCode())
+                .message(result.getMessage())
+                .timestamp(result.getTimestamp())
+                .metadata(metadata)
+                .cardBin(result.getCardBin())
+                .cardLast4(result.getCardLast4())
+                .networkToken(result.getNetworkToken())
+                .par(result.getPar())
+                .cardFingerprint(result.getCardFingerprint())
+                .build();
     }
 
     private static PaymentResult buildFailureResult(PaymentRequest request, String code, String message) {

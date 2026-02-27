@@ -67,6 +67,10 @@ public class PaymentTransactionEntity {
     @Column(name = "correlation_id")
     private String correlationId;
 
+    /** PSP adapter that processed this payment (e.g. MockStripeAdapter). Used for refund routing. */
+    @Column(name = "adapter_name")
+    private String adapterName;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

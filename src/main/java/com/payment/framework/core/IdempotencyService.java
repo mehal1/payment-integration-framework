@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -82,6 +84,14 @@ public class IdempotencyService {
      * Converts PaymentTransactionEntity to PaymentResult for idempotency checks.
      */
     private PaymentResult convertEntityToResult(PaymentTransactionEntity entity) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (entity.getAdapterName() != null) {
+            metadata.put("adapterName", entity.getAdapterName());
+        }
+        if (entity.getProviderType() != null) {
+            metadata.put("providerType", entity.getProviderType().name());
+        }
+
         return PaymentResult.builder()
                 .idempotencyKey(entity.getIdempotencyKey())
                 .providerTransactionId(entity.getProviderTransactionId())
@@ -91,7 +101,7 @@ public class IdempotencyService {
                 .failureCode(entity.getFailureCode())
                 .message(entity.getFailureMessage())
                 .timestamp(entity.getCreatedAt() != null ? entity.getCreatedAt() : Instant.now())
-                .metadata(null)
+                .metadata(metadata)
                 .build();
     }
 

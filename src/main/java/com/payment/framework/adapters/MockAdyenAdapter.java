@@ -4,6 +4,9 @@ import com.payment.framework.core.PSPAdapter;
 import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentRequest;
 import com.payment.framework.domain.PaymentResult;
+import com.payment.framework.domain.RefundRequest;
+import com.payment.framework.domain.RefundResult;
+import com.payment.framework.domain.RefundStatus;
 import com.payment.framework.domain.TransactionStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -60,5 +63,24 @@ public class MockAdyenAdapter implements PSPAdapter {
                 .timestamp(Instant.now())
                 .metadata(Map.of("mock", true, "psp", "MOCK_ADYEN"))
                 .build();
+    }
+
+    @Override
+    public java.util.Optional<RefundResult> refund(RefundRequest request) {
+        log.debug("MockAdyenAdapter refunding refundIdempotencyKey={}, paymentIdempotencyKey={}, amount={}",
+                request.getIdempotencyKey(), request.getPaymentIdempotencyKey(), request.getAmount());
+
+        return java.util.Optional.of(RefundResult.builder()
+                .idempotencyKey(request.getIdempotencyKey())
+                .paymentIdempotencyKey(request.getPaymentIdempotencyKey())
+                .providerRefundId("mock-adyen-refund-" + UUID.randomUUID())
+                .status(RefundStatus.SUCCESS)
+                .amount(request.getAmount())
+                .currencyCode(request.getCurrencyCode())
+                .failureCode(null)
+                .message("Refund processed successfully")
+                .timestamp(Instant.now())
+                .metadata(Map.of("mock", true, "psp", "MOCK_ADYEN"))
+                .build());
     }
 }
