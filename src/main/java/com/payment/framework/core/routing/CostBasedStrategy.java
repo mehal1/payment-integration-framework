@@ -1,11 +1,12 @@
 package com.payment.framework.core.routing;
 
-import com.payment.framework.domain.PaymentProviderType;
+import com.payment.framework.core.PSPAdapter;
 import com.payment.framework.domain.PaymentRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -13,42 +14,50 @@ import java.util.Optional;
 /**
  * Cost-Based routing strategy.
  * Routes requests to the provider with the lowest cost per transaction.
- * Considers both transaction fees and success rate (failed transactions waste fees).
+ * Uses contract-based fee config when available.
+ * Falls back to historical average cost when no fee config exists.
+ * Considers success rate: effective cost = cost / success rate (failed transactions waste fees).
  */
 @Slf4j
 @Component
 public class CostBasedStrategy implements ProviderRoutingStrategy {
 
     @Override
-    public Optional<PaymentProviderType> selectProvider(
+    public Optional<PSPAdapter> selectAdapter(
             PaymentRequest request,
-            List<PaymentProviderType> availableProviders,
-            ProviderPerformanceMetrics metrics) {
+            List<PSPAdapter> availableAdapters,
+            PSPPerformanceMetrics metrics,
+            ProviderFeeConfig feeConfig) {
 
-        if (availableProviders.isEmpty()) {
+        if (availableAdapters.isEmpty()) {
             return Optional.empty();
         }
 
-        // Calculate effective cost = average cost / success rate
-        // Higher success rate = lower effective cost (failed transactions waste fees)
-        PaymentProviderType selected = availableProviders.stream()
-                .min(Comparator.comparing(provider -> {
-                    BigDecimal avgCost = metrics.getAverageCost(provider);
-                    double successRate = metrics.getSuccessRate(provider);
-                    // Effective cost = cost per successful transaction
-                    // If success rate is 0, use very high cost
+        BigDecimal amount = request.getAmount() != null ? request.getAmount() : BigDecimal.ZERO;
+
+        PSPAdapter selected = availableAdapters.stream()
+                .min(Comparator.comparing(adapter -> {
+                    String name = adapter.getPSPAdapterName();
+                    BigDecimal cost = feeConfig.hasFeeConfig(name)
+                            ? feeConfig.computeCost(name, amount)
+                            : metrics.getAverageCost(name);
+                    double successRate = metrics.getSuccessRate(name);
                     if (successRate == 0.0) {
                         return BigDecimal.valueOf(Double.MAX_VALUE);
                     }
-                    return avgCost.divide(BigDecimal.valueOf(successRate), 4, java.math.RoundingMode.HALF_UP);
+                    return cost.divide(BigDecimal.valueOf(successRate), 4, RoundingMode.HALF_UP);
                 }))
-                .orElse(availableProviders.get(0));
+                .orElse(availableAdapters.get(0));
 
-        BigDecimal effectiveCost = metrics.getAverageCost(selected)
-                .divide(BigDecimal.valueOf(Math.max(0.01, metrics.getSuccessRate(selected))), 4, java.math.RoundingMode.HALF_UP);
+        String selectedName = selected.getPSPAdapterName();
+        BigDecimal cost = feeConfig.hasFeeConfig(selectedName)
+                ? feeConfig.computeCost(selectedName, amount)
+                : metrics.getAverageCost(selectedName);
+        double successRate = Math.max(0.01, metrics.getSuccessRate(selectedName));
+        BigDecimal effectiveCost = cost.divide(BigDecimal.valueOf(successRate), 4, RoundingMode.HALF_UP);
 
-        log.debug("CostBased selected provider={} with effective cost={} (avgCost={}, successRate={})",
-                selected, effectiveCost, metrics.getAverageCost(selected), metrics.getSuccessRate(selected));
+        log.debug("CostBased selected adapter={} with effective cost={} (cost={}, successRate={})",
+                selected.getPSPAdapterName(), effectiveCost, cost, successRate);
 
         return Optional.of(selected);
     }

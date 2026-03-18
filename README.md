@@ -232,7 +232,7 @@ flowchart LR
 
 - **PaymentOrchestrator**: Routes requests to appropriate PSP adapter with intelligent routing and automatic failover, applies idempotency, circuit breakers, and retries
 - **ProviderRouter**: Selects best PSP (Stripe, Adyen, etc.) using configurable routing strategies (Weighted Round-Robin, Least Connections, Cost-Based, etc.)
-- **ProviderPerformanceMetrics**: Tracks PSP performance (success rate, latency, cost, connections) for intelligent routing
+- **PSPPerformanceMetrics**: Tracks PSP performance (success rate, latency, cost, connections) for intelligent routing
 - **PSP Adapters** (e.g., `StripeAdapter`, `AdyenAdapter`): Code adapters that wrap external PSP APIs (Stripe, Adyen, PayPal) and convert between framework format and PSP-specific formats
 - **IdempotencyService**: Redis-backed cache to prevent duplicate processing
 - **PaymentEventProducer**: Publishes payment lifecycle events to Kafka 

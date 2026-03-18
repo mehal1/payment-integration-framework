@@ -6,65 +6,109 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.LongAdder;
 
 /**
- * Tracks performance metrics for each payment provider to enable intelligent routing.
- * Metrics include success rate, average latency, cost per transaction, and active connections.
+ * Tracks performance metrics for each PSP (Payment Service Provider) to enable intelligent routing.
+ * Metrics include success rate, average latency, and active connections.
  * Thread-safe implementation using atomic operations.
  */
 @Slf4j
 @Component
-public class ProviderPerformanceMetrics {
+public class PSPPerformanceMetrics {
 
     private static final int WINDOW_SIZE = 1000; // Track last 1000 transactions per provider
     private static final long METRICS_TTL_MS = 24 * 60 * 60 * 1000L; // 24 hours
 
     private final Map<PaymentProviderType, ProviderMetrics> metrics = new ConcurrentHashMap<>();
+    private final Map<String, ProviderMetrics> adapterMetrics = new ConcurrentHashMap<>();
+    private final Map<String, PaymentProviderType> adapterToType = new ConcurrentHashMap<>();
 
     /**
-     * Record a successful transaction.
+     * Record a successful transaction (adapter-level for accurate per-PSP routing).
      */
-    public void recordSuccess(PaymentProviderType provider, long latencyMs, BigDecimal cost) {
-        ProviderMetrics m = metrics.computeIfAbsent(provider, k -> new ProviderMetrics());
-        m.recordSuccess(latencyMs, cost);
-        log.debug("Recorded success for provider={}, latency={}ms, cost={}", provider, latencyMs, cost);
+    public void recordSuccess(String adapterName, PaymentProviderType providerType, long latencyMs) {
+        adapterToType.put(adapterName, providerType);
+        ProviderMetrics m = adapterMetrics.computeIfAbsent(adapterName, k -> new ProviderMetrics());
+        m.recordSuccess(latencyMs);
+        // Also update provider-type metrics for backward compatibility
+        ProviderMetrics typeM = metrics.computeIfAbsent(providerType, k -> new ProviderMetrics());
+        typeM.recordSuccess(latencyMs);
+        log.debug("Recorded success for adapter={}, type={}, latency={}ms", adapterName, providerType, latencyMs);
     }
 
     /**
      * Record a failed transaction.
      */
-    public void recordFailure(PaymentProviderType provider, long latencyMs) {
-        ProviderMetrics m = metrics.computeIfAbsent(provider, k -> new ProviderMetrics());
+    public void recordFailure(String adapterName, PaymentProviderType providerType, long latencyMs) {
+        adapterToType.put(adapterName, providerType);
+        ProviderMetrics m = adapterMetrics.computeIfAbsent(adapterName, k -> new ProviderMetrics());
         m.recordFailure(latencyMs);
-        log.debug("Recorded failure for provider={}, latency={}ms", provider, latencyMs);
+        ProviderMetrics typeM = metrics.computeIfAbsent(providerType, k -> new ProviderMetrics());
+        typeM.recordFailure(latencyMs);
+        log.debug("Recorded failure for adapter={}, type={}, latency={}ms", adapterName, providerType, latencyMs);
     }
 
     /**
      * Increment active connection count (when starting a request).
      */
-    public void incrementActiveConnections(PaymentProviderType provider) {
-        ProviderMetrics m = metrics.computeIfAbsent(provider, k -> new ProviderMetrics());
+    public void incrementActiveConnections(String adapterName, PaymentProviderType providerType) {
+        adapterToType.put(adapterName, providerType);
+        ProviderMetrics m = adapterMetrics.computeIfAbsent(adapterName, k -> new ProviderMetrics());
         m.incrementActiveConnections();
+        ProviderMetrics typeM = metrics.computeIfAbsent(providerType, k -> new ProviderMetrics());
+        typeM.incrementActiveConnections();
     }
 
     /**
      * Decrement active connection count (when request completes).
      */
-    public void decrementActiveConnections(PaymentProviderType provider) {
-        ProviderMetrics m = metrics.get(provider);
-        if (m != null) {
-            m.decrementActiveConnections();
-        }
+    public void decrementActiveConnections(String adapterName, PaymentProviderType providerType) {
+        ProviderMetrics m = adapterMetrics.get(adapterName);
+        if (m != null) m.decrementActiveConnections();
+        ProviderMetrics typeM = metrics.get(providerType);
+        if (typeM != null) typeM.decrementActiveConnections();
     }
 
     /**
-     * Get success rate (0.0 to 1.0) for the provider.
+     * Get success rate (0.0 to 1.0) for the adapter (per-PSP).
+     */
+    public double getSuccessRate(String adapterName) {
+        ProviderMetrics m = adapterMetrics.get(adapterName);
+        if (m == null) return 0.0;
+        return m.getSuccessRate();
+    }
+
+    /**
+     * Get average latency in milliseconds for the adapter.
+     */
+    public long getAverageLatency(String adapterName) {
+        ProviderMetrics m = adapterMetrics.get(adapterName);
+        if (m == null) return Long.MAX_VALUE;
+        return m.getAverageLatency();
+    }
+
+    /**
+     * Get average cost per transaction for the adapter.
+     */
+    public BigDecimal getAverageCost(String adapterName) {
+        return BigDecimal.ZERO;
+    }
+
+    /**
+     * Get current active connection count for the adapter.
+     */
+    public int getActiveConnections(String adapterName) {
+        ProviderMetrics m = adapterMetrics.get(adapterName);
+        if (m == null) return 0;
+        return m.getActiveConnections();
+    }
+
+    /**
+     * Get success rate for provider type (aggregated from adapters of that type).
      */
     public double getSuccessRate(PaymentProviderType provider) {
         ProviderMetrics m = metrics.get(provider);
@@ -73,7 +117,7 @@ public class ProviderPerformanceMetrics {
     }
 
     /**
-     * Get average latency in milliseconds.
+     * Get average latency in milliseconds for provider type.
      */
     public long getAverageLatency(PaymentProviderType provider) {
         ProviderMetrics m = metrics.get(provider);
@@ -82,16 +126,14 @@ public class ProviderPerformanceMetrics {
     }
 
     /**
-     * Get average cost per transaction.
+     * Get average cost per transaction for provider type.
      */
     public BigDecimal getAverageCost(PaymentProviderType provider) {
-        ProviderMetrics m = metrics.get(provider);
-        if (m == null) return BigDecimal.ZERO;
-        return m.getAverageCost();
+        return BigDecimal.ZERO;
     }
 
     /**
-     * Get current active connection count.
+     * Get current active connection count for provider type.
      */
     public int getActiveConnections(PaymentProviderType provider) {
         ProviderMetrics m = metrics.get(provider);
@@ -100,7 +142,7 @@ public class ProviderPerformanceMetrics {
     }
 
     /**
-     * Get total transaction count.
+     * Get total transaction count for provider type.
      */
     public int getTotalTransactions(PaymentProviderType provider) {
         ProviderMetrics m = metrics.get(provider);
@@ -109,7 +151,7 @@ public class ProviderPerformanceMetrics {
     }
 
     /**
-     * Get all metrics for a provider.
+     * Get all metrics for a provider type.
      */
     public ProviderStats getStats(PaymentProviderType provider) {
         ProviderMetrics m = metrics.get(provider);
@@ -120,7 +162,27 @@ public class ProviderPerformanceMetrics {
                 provider,
                 m.getSuccessRate(),
                 m.getAverageLatency(),
-                m.getAverageCost(),
+                BigDecimal.ZERO,
+                m.getActiveConnections(),
+                m.getTotalTransactions()
+        );
+    }
+
+    /**
+     * Get metrics for a specific adapter (per-PSP).
+     */
+    public AdapterStats getStatsByAdapter(String adapterName) {
+        ProviderMetrics m = adapterMetrics.get(adapterName);
+        PaymentProviderType type = adapterToType.getOrDefault(adapterName, PaymentProviderType.MOCK);
+        if (m == null) {
+            return new AdapterStats(adapterName, type, 0.0, 0L, BigDecimal.ZERO, 0, 0);
+        }
+        return new AdapterStats(
+                adapterName,
+                type,
+                m.getSuccessRate(),
+                m.getAverageLatency(),
+                BigDecimal.ZERO,
                 m.getActiveConnections(),
                 m.getTotalTransactions()
         );
@@ -133,17 +195,14 @@ public class ProviderPerformanceMetrics {
         private final AtomicInteger successCount = new AtomicInteger(0);
         private final AtomicInteger failureCount = new AtomicInteger(0);
         private final AtomicLong totalLatencyMs = new AtomicLong(0);
-        private final LongAdder totalCost = new LongAdder(); // Store as cents (long)
         private final AtomicInteger activeConnections = new AtomicInteger(0);
         private final AtomicInteger totalTransactions = new AtomicInteger(0);
 
-        void recordSuccess(long latencyMs, BigDecimal cost) {
+        void recordSuccess(long latencyMs) {
             successCount.incrementAndGet();
             totalLatencyMs.addAndGet(latencyMs);
-            totalCost.add(cost.multiply(BigDecimal.valueOf(100)).longValue()); // Convert to cents
             int total = totalTransactions.incrementAndGet();
             if (total > WINDOW_SIZE) {
-                // Reset metrics periodically to use sliding window
                 resetMetrics();
             }
         }
@@ -177,15 +236,6 @@ public class ProviderPerformanceMetrics {
             return totalLatencyMs.get() / total;
         }
 
-        BigDecimal getAverageCost() {
-            int total = totalTransactions.get();
-            if (total == 0) return BigDecimal.ZERO;
-            long totalCostCents = totalCost.sum();
-            return BigDecimal.valueOf(totalCostCents)
-                    .divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP)
-                    .divide(BigDecimal.valueOf(total), 4, RoundingMode.HALF_UP);
-        }
-
         int getActiveConnections() {
             return activeConnections.get();
         }
@@ -205,12 +255,26 @@ public class ProviderPerformanceMetrics {
     }
 
     /**
-     * Immutable stats snapshot for a provider.
+     * Immutable stats snapshot for a provider type.
      */
     @Value
     public static class ProviderStats {
         PaymentProviderType provider;
         double successRate; // 0.0 to 1.0
+        long averageLatencyMs;
+        BigDecimal averageCost;
+        int activeConnections;
+        int totalTransactions;
+    }
+
+    /**
+     * Immutable stats snapshot for an adapter (per-PSP).
+     */
+    @Value
+    public static class AdapterStats {
+        String adapterName;
+        PaymentProviderType providerType;
+        double successRate;
         long averageLatencyMs;
         BigDecimal averageCost;
         int activeConnections;

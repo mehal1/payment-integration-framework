@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ABTestingFramework {
 
     private final Map<String, ABTest> activeTests = new ConcurrentHashMap<>();
-    private final ProviderPerformanceMetrics metrics;
+    private final PSPPerformanceMetrics metrics;
 
     /**
      * Create an A/B test to compare providers.
@@ -82,7 +82,7 @@ public class ABTestingFramework {
             throw new IllegalArgumentException("Test not found: " + testId);
         }
 
-        Map<PaymentProviderType, ProviderPerformanceMetrics.ProviderStats> results = new HashMap<>();
+        Map<PaymentProviderType, PSPPerformanceMetrics.ProviderStats> results = new HashMap<>();
         for (PaymentProviderType provider : test.getProviders()) {
             results.put(provider, metrics.getStats(provider));
         }
@@ -124,6 +124,6 @@ public class ABTestingFramework {
     @Value
     public static class ABTestResults {
         String testId;
-        Map<PaymentProviderType, ProviderPerformanceMetrics.ProviderStats> providerStats;
+        Map<PaymentProviderType, PSPPerformanceMetrics.ProviderStats> providerStats;
     }
 }

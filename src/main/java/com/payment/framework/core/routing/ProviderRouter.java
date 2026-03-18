@@ -23,18 +23,21 @@ import java.util.stream.Collectors;
 public class ProviderRouter {
 
     private final Map<PaymentProviderType, List<PSPAdapter>> adaptersByType;
-    private final ProviderPerformanceMetrics metrics;
+    private final PSPPerformanceMetrics metrics;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final ProviderRoutingStrategy routingStrategy;
+    private final ProviderFeeConfig feeConfig;
 
     public ProviderRouter(
             List<PSPAdapter> adapters,
-            ProviderPerformanceMetrics metrics,
+            PSPPerformanceMetrics metrics,
             CircuitBreakerRegistry circuitBreakerRegistry,
-            ProviderRoutingStrategy routingStrategy) {
+            ProviderRoutingStrategy routingStrategy,
+            ProviderFeeConfig feeConfig) {
         this.metrics = metrics;
         this.circuitBreakerRegistry = circuitBreakerRegistry;
         this.routingStrategy = routingStrategy;
+        this.feeConfig = feeConfig;
         log.info("Initializing ProviderRouter with {} PSP adapters", adapters.size());
         if (adapters.isEmpty()) {
             log.warn("No PSP adapters found! Make sure adapters are annotated with @Component and implement PSPAdapter");
@@ -84,50 +87,32 @@ public class ProviderRouter {
             return Optional.of(adapter);
         }
 
-        List<PaymentProviderType> healthyProviderTypes = healthyAdapters.stream()
-                .map(PSPAdapter::getProviderType)
-                .distinct()
-                .collect(Collectors.toList());
+        // For testing: if request specifies adapter name in metadata, use that adapter
+        if (request.getProviderPayload() != null && request.getProviderPayload().containsKey("testAdapterName")) {
+            String requestedAdapterName = (String) request.getProviderPayload().get("testAdapterName");
+            Optional<PSPAdapter> testAdapter = healthyAdapters.stream()
+                    .filter(a -> a.getPSPAdapterName().equals(requestedAdapterName))
+                    .findFirst();
+            if (testAdapter.isPresent()) {
+                log.debug("Using test-specified adapter: {}", requestedAdapterName);
+                return testAdapter;
+            }
+        }
 
-        Optional<PaymentProviderType> selectedType = routingStrategy.selectProvider(
-                request, healthyProviderTypes, metrics);
+        // Use adapter-level selection (supports cost-based routing with multiple PSPs of same type)
+        Optional<PSPAdapter> selectedAdapter = routingStrategy.selectAdapter(
+                request, healthyAdapters, metrics, feeConfig);
 
-        if (selectedType.isEmpty()) {
+        if (selectedAdapter.isEmpty()) {
             log.warn("Routing strategy returned no PSP for type={}", requestedType);
             return Optional.empty();
         }
 
-        // For testing: if request specifies adapter name in metadata, use that adapter
-        PSPAdapter selectedAdapter = null;
-        if (request.getProviderPayload() != null && request.getProviderPayload().containsKey("testAdapterName")) {
-            String requestedAdapterName = (String) request.getProviderPayload().get("testAdapterName");
-            selectedAdapter = healthyAdapters.stream()
-                    .filter(a -> a.getPSPAdapterName().equals(requestedAdapterName))
-                    .findFirst()
-                    .orElse(null);
-            if (selectedAdapter != null) {
-                log.debug("Using test-specified adapter: {}", requestedAdapterName);
-            }
-        }
-        
-        // Default: select first adapter matching the selected type
-        if (selectedAdapter == null) {
-            selectedAdapter = healthyAdapters.stream()
-                    .filter(a -> a.getProviderType() == selectedType.get())
-                    .findFirst()
-                    .orElse(null);
-        }
-
-        if (selectedAdapter == null) {
-            log.error("Selected PSP type={} but no healthy adapter found", selectedType.get());
-            return Optional.empty();
-        }
-
         log.info("Router selected PSP adapter={} (type={}) using strategy={} for request idempotencyKey={}",
-                selectedAdapter.getPSPAdapterName(), selectedType.get(), routingStrategy.getStrategyName(), 
-                request.getIdempotencyKey());
+                selectedAdapter.get().getPSPAdapterName(), selectedAdapter.get().getProviderType(),
+                routingStrategy.getStrategyName(), request.getIdempotencyKey());
 
-        return Optional.of(selectedAdapter);
+        return selectedAdapter;
     }
 
     public List<PaymentProviderType> getAvailableProviders(PaymentProviderType type) {

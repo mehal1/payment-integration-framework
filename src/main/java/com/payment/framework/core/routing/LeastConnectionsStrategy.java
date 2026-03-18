@@ -1,6 +1,6 @@
 package com.payment.framework.core.routing;
 
-import com.payment.framework.domain.PaymentProviderType;
+import com.payment.framework.core.PSPAdapter;
 import com.payment.framework.domain.PaymentRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -11,30 +11,30 @@ import java.util.Optional;
 
 /**
  * Least Connections routing strategy.
- * Routes requests to the provider with the fewest active connections.
- * Useful for load balancing and preventing provider overload.
+ * Routes requests to the adapter with the fewest active connections.
+ * Useful for load balancing and preventing adapter overload.
  */
 @Slf4j
 @Component
 public class LeastConnectionsStrategy implements ProviderRoutingStrategy {
 
     @Override
-    public Optional<PaymentProviderType> selectProvider(
+    public Optional<PSPAdapter> selectAdapter(
             PaymentRequest request,
-            List<PaymentProviderType> availableProviders,
-            ProviderPerformanceMetrics metrics) {
+            List<PSPAdapter> availableAdapters,
+            PSPPerformanceMetrics metrics,
+            ProviderFeeConfig feeConfig) {
 
-        if (availableProviders.isEmpty()) {
+        if (availableAdapters.isEmpty()) {
             return Optional.empty();
         }
 
-        // Select provider with least active connections
-        PaymentProviderType selected = availableProviders.stream()
-                .min(Comparator.comparingInt(metrics::getActiveConnections))
-                .orElse(availableProviders.get(0));
+        PSPAdapter selected = availableAdapters.stream()
+                .min(Comparator.comparingInt(a -> metrics.getActiveConnections(a.getPSPAdapterName())))
+                .orElse(availableAdapters.get(0));
 
-        log.debug("LeastConnections selected provider={} with {} active connections",
-                selected, metrics.getActiveConnections(selected));
+        log.debug("LeastConnections selected adapter={} with {} active connections",
+                selected.getPSPAdapterName(), metrics.getActiveConnections(selected.getPSPAdapterName()));
 
         return Optional.of(selected);
     }

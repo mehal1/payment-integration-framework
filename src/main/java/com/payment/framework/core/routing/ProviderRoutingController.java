@@ -19,13 +19,13 @@ import java.util.Set;
 @Tag(name = "Routing", description = "Provider metrics, A/B tests, and routing configuration")
 public class ProviderRoutingController {
 
-    private final ProviderPerformanceMetrics metrics;
+    private final PSPPerformanceMetrics metrics;
     private final ABTestingFramework abTestingFramework;
 
     @GetMapping("/metrics")
     @Operation(summary = "All provider metrics", description = "Performance metrics for all payment providers (MOCK, CARD, WALLET)")
-    public ResponseEntity<Map<PaymentProviderType, ProviderPerformanceMetrics.ProviderStats>> getMetrics() {
-        Map<PaymentProviderType, ProviderPerformanceMetrics.ProviderStats> allMetrics = Map.of(
+    public ResponseEntity<Map<PaymentProviderType, PSPPerformanceMetrics.ProviderStats>> getMetrics() {
+        Map<PaymentProviderType, PSPPerformanceMetrics.ProviderStats> allMetrics = Map.of(
                 PaymentProviderType.MOCK, metrics.getStats(PaymentProviderType.MOCK),
                 PaymentProviderType.CARD, metrics.getStats(PaymentProviderType.CARD),
                 PaymentProviderType.WALLET, metrics.getStats(PaymentProviderType.WALLET)
@@ -35,9 +35,16 @@ public class ProviderRoutingController {
 
     @GetMapping("/metrics/{providerType}")
     @Operation(summary = "Metrics for one provider", description = "Performance stats for the given provider type (MOCK, CARD, WALLET)")
-    public ResponseEntity<ProviderPerformanceMetrics.ProviderStats> getProviderMetrics(
+    public ResponseEntity<PSPPerformanceMetrics.ProviderStats> getProviderMetrics(
             @PathVariable PaymentProviderType providerType) {
         return ResponseEntity.ok(metrics.getStats(providerType));
+    }
+
+    @GetMapping("/metrics/adapter/{adapterName}")
+    @Operation(summary = "Metrics for one adapter", description = "Performance stats for the given PSP adapter (e.g., MockStripeAdapter, MockAdyenAdapter)")
+    public ResponseEntity<PSPPerformanceMetrics.AdapterStats> getAdapterMetrics(
+            @PathVariable String adapterName) {
+        return ResponseEntity.ok(metrics.getStatsByAdapter(adapterName));
     }
 
     @PostMapping("/ab-test")

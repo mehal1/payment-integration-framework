@@ -1,7 +1,7 @@
 package com.payment.framework.core;
 
 import com.payment.framework.api.NoPspAvailableException;
-import com.payment.framework.core.routing.ProviderPerformanceMetrics;
+import com.payment.framework.core.routing.PSPPerformanceMetrics;
 import com.payment.framework.core.routing.ProviderRouter;
 import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentRequest;
@@ -29,6 +29,8 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import jakarta.annotation.PostConstruct;
+
     /**
      * Handles payment execution, picks the best PSP, and switches to backups if one fails.
      */
@@ -44,7 +46,7 @@ public class PaymentOrchestrator {
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final RetryRegistry retryRegistry;
     private final ProviderRouter providerRouter;
-    private final ProviderPerformanceMetrics metrics;
+    private final PSPPerformanceMetrics metrics;
     private final PaymentPersistenceService persistenceService;
 
     @Value("${payment.routing.failover.enabled:true}")
@@ -55,7 +57,7 @@ public class PaymentOrchestrator {
 
     private Map<PaymentProviderType, PSPAdapter> adapterByType;
 
-    @jakarta.annotation.PostConstruct
+    @PostConstruct
     void init() {
         log.info("Initializing PaymentOrchestrator with {} PSP adapters", adapters.size());
         if (adapters.isEmpty()) {
@@ -150,8 +152,9 @@ public class PaymentOrchestrator {
             }
             attemptedAdapters.add(adapter);
 
+            String adapterName = adapter.getPSPAdapterName();
             long startTime = System.currentTimeMillis();
-            metrics.incrementActiveConnections(providerType);
+            metrics.incrementActiveConnections(adapterName, providerType);
 
             try {
                 log.info("Executing payment with adapter: providerType={}, adapterClass={}", 
@@ -174,10 +177,9 @@ public class PaymentOrchestrator {
 
                 if (result.getStatus() == TransactionStatus.SUCCESS || 
                     result.getStatus() == TransactionStatus.CAPTURED) {
-                    BigDecimal cost = extractCost(result);
-                    metrics.recordSuccess(providerType, latencyMs, cost);
+                    metrics.recordSuccess(adapterName, providerType, latencyMs);
                 } else {
-                    metrics.recordFailure(providerType, latencyMs);
+                    metrics.recordFailure(adapterName, providerType, latencyMs);
                 }
 
                 log.info("Payment executed successfully with provider={} (attempt={}, latency={}ms)",
@@ -188,7 +190,7 @@ public class PaymentOrchestrator {
 
             } catch (CallNotPermittedException e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
-                metrics.recordFailure(providerType, latencyMs);
+                metrics.recordFailure(adapterName, providerType, latencyMs);
                 log.warn("Circuit open for provider={} (attempt={}); failing over to next PSP", providerType, attempt + 1);
                 lastException = e;
                 if (!failoverEnabled || attempt >= maxFailoverAttempts - 1) {
@@ -196,7 +198,7 @@ public class PaymentOrchestrator {
                 }
             } catch (Exception e) {
                 long latencyMs = System.currentTimeMillis() - startTime;
-                metrics.recordFailure(providerType, latencyMs);
+                metrics.recordFailure(adapterName, providerType, latencyMs);
                 log.error("Provider execution failed for provider={} (attempt={})",
                         providerType, attempt + 1, e);
                 lastException = e;
@@ -205,7 +207,7 @@ public class PaymentOrchestrator {
                     break;
                 }
             } finally {
-                metrics.decrementActiveConnections(providerType);
+                metrics.decrementActiveConnections(adapterName, providerType);
             }
         }
 
@@ -259,18 +261,6 @@ public class PaymentOrchestrator {
         Supplier<PaymentResult> withCb = CircuitBreaker.decorateSupplier(cb, withRetry);
 
         return withCb.get();
-    }
-
-    private BigDecimal extractCost(PaymentResult result) {
-        if (result.getMetadata() != null && result.getMetadata().containsKey("cost")) {
-            Object costObj = result.getMetadata().get("cost");
-            if (costObj instanceof BigDecimal) {
-                return (BigDecimal) costObj;
-            } else if (costObj instanceof Number) {
-                return BigDecimal.valueOf(((Number) costObj).doubleValue());
-            }
-        }
-        return BigDecimal.ZERO;
     }
 
     public Optional<PSPAdapter> getAdapter(PaymentProviderType type) {

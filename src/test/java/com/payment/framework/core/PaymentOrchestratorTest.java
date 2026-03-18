@@ -1,6 +1,6 @@
 package com.payment.framework.core;
 
-import com.payment.framework.core.routing.ProviderPerformanceMetrics;
+import com.payment.framework.core.routing.PSPPerformanceMetrics;
 import com.payment.framework.core.routing.ProviderRouter;
 import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.domain.PaymentRequest;
@@ -29,6 +29,7 @@ import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -52,7 +53,7 @@ class PaymentOrchestratorTest {
 	@Mock
 	private ProviderRouter providerRouter;
 	@Mock
-	private ProviderPerformanceMetrics metrics;
+	private PSPPerformanceMetrics metrics;
 	@Mock
 	private com.payment.framework.persistence.service.PaymentPersistenceService persistenceService;
 
@@ -72,10 +73,10 @@ class PaymentOrchestratorTest {
 		lenient().when(providerRouter.selectProvider(any(PaymentRequest.class)))
 				.thenReturn(Optional.of(mockAdapter));
 		// Mock metrics methods (no-op for unit tests)
-		lenient().doNothing().when(metrics).incrementActiveConnections(any(PaymentProviderType.class));
-		lenient().doNothing().when(metrics).decrementActiveConnections(any(PaymentProviderType.class));
-		lenient().doNothing().when(metrics).recordSuccess(any(PaymentProviderType.class), anyLong(), any(java.math.BigDecimal.class));
-		lenient().doNothing().when(metrics).recordFailure(any(PaymentProviderType.class), anyLong());
+		lenient().doNothing().when(metrics).incrementActiveConnections(anyString(), any(PaymentProviderType.class));
+		lenient().doNothing().when(metrics).decrementActiveConnections(anyString(), any(PaymentProviderType.class));
+		lenient().doNothing().when(metrics).recordSuccess(anyString(), any(PaymentProviderType.class), anyLong());
+		lenient().doNothing().when(metrics).recordFailure(anyString(), any(PaymentProviderType.class), anyLong());
 		orchestrator = new PaymentOrchestrator(
 				List.of(mockAdapter),
 				idempotencyService,

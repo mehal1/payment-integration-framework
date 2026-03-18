@@ -1,6 +1,6 @@
 package com.payment.framework.core.routing;
 
-import com.payment.framework.domain.PaymentProviderType;
+import com.payment.framework.core.PSPAdapter;
 import com.payment.framework.domain.PaymentRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -10,60 +10,58 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Weighted Round-Robin routing strategy.
- * Routes requests based on provider weights (derived from success rate and performance).
- * Providers with higher success rates get more traffic.
+ * Routes requests based on adapter weights (derived from success rate).
+ * Adapters with higher success rates get more traffic.
  */
 @Slf4j
 @Component
 public class WeightedRoundRobinStrategy implements ProviderRoutingStrategy {
 
-    private final Map<PaymentProviderType, AtomicInteger> currentIndex = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> currentIndex = new ConcurrentHashMap<>();
 
     @Override
-    public Optional<PaymentProviderType> selectProvider(
+    public Optional<PSPAdapter> selectAdapter(
             PaymentRequest request,
-            List<PaymentProviderType> availableProviders,
-            ProviderPerformanceMetrics metrics) {
+            List<PSPAdapter> availableAdapters,
+            PSPPerformanceMetrics metrics,
+            ProviderFeeConfig feeConfig) {
 
-        if (availableProviders.isEmpty()) {
+        if (availableAdapters.isEmpty()) {
             return Optional.empty();
         }
 
-        if (availableProviders.size() == 1) {
-            return Optional.of(availableProviders.get(0));
+        if (availableAdapters.size() == 1) {
+            return Optional.of(availableAdapters.get(0));
         }
 
-        // Calculate weights based on success rate (higher success rate = higher weight)
+        // Calculate weights based on success rate per adapter
         int totalWeight = 0;
-        int[] weights = new int[availableProviders.size()];
-        for (int i = 0; i < availableProviders.size(); i++) {
-            PaymentProviderType provider = availableProviders.get(i);
-            double successRate = metrics.getSuccessRate(provider);
-            // Weight = success rate * 100 (0-100 scale)
-            // Minimum weight of 1 to ensure all providers get some traffic
+        int[] weights = new int[availableAdapters.size()];
+        for (int i = 0; i < availableAdapters.size(); i++) {
+            double successRate = metrics.getSuccessRate(availableAdapters.get(i).getPSPAdapterName());
             weights[i] = Math.max(1, (int) (successRate * 100));
             totalWeight += weights[i];
         }
 
-        // Select provider using weighted round-robin
-        int selectedIndex = selectWeightedIndex(availableProviders, weights, totalWeight);
-        PaymentProviderType selected = availableProviders.get(selectedIndex);
+        String key = availableAdapters.stream()
+                .map(PSPAdapter::getPSPAdapterName)
+                .sorted()
+                .collect(Collectors.joining(","));
+        int selectedIndex = selectWeightedIndex(weights, totalWeight, key);
 
-        log.debug("WeightedRoundRobin selected provider={} from {} providers (weights={})",
-                selected, availableProviders.size(), weights);
+        PSPAdapter selected = availableAdapters.get(selectedIndex);
+        log.debug("WeightedRoundRobin selected adapter={} from {} adapters (weights={})",
+                selected.getPSPAdapterName(), availableAdapters.size(), weights);
 
         return Optional.of(selected);
     }
 
-    private int selectWeightedIndex(List<PaymentProviderType> providers, int[] weights, int totalWeight) {
-        // Get current index for this provider set (use first provider as key)
-        PaymentProviderType key = providers.get(0);
+    private int selectWeightedIndex(int[] weights, int totalWeight, String key) {
         AtomicInteger index = currentIndex.computeIfAbsent(key, k -> new AtomicInteger(0));
-
-        // Simple round-robin with weights
         int current = index.getAndIncrement() % totalWeight;
         int cumulativeWeight = 0;
 
@@ -73,8 +71,7 @@ public class WeightedRoundRobinStrategy implements ProviderRoutingStrategy {
                 return i;
             }
         }
-
-        return 0; // Fallback
+        return 0;
     }
 
     @Override

@@ -1,6 +1,6 @@
 package com.payment.framework.core.routing;
 
-import com.payment.framework.domain.PaymentProviderType;
+import com.payment.framework.core.PSPAdapter;
 import com.payment.framework.domain.PaymentRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -11,7 +11,7 @@ import java.util.Optional;
 
 /**
  * Response Time-Based routing strategy.
- * Routes requests to the provider with the lowest average latency.
+ * Routes requests to the adapter with the lowest average latency.
  * Prioritizes speed over cost or other factors.
  */
 @Slf4j
@@ -19,22 +19,22 @@ import java.util.Optional;
 public class ResponseTimeBasedStrategy implements ProviderRoutingStrategy {
 
     @Override
-    public Optional<PaymentProviderType> selectProvider(
+    public Optional<PSPAdapter> selectAdapter(
             PaymentRequest request,
-            List<PaymentProviderType> availableProviders,
-            ProviderPerformanceMetrics metrics) {
+            List<PSPAdapter> availableAdapters,
+            PSPPerformanceMetrics metrics,
+            ProviderFeeConfig feeConfig) {
 
-        if (availableProviders.isEmpty()) {
+        if (availableAdapters.isEmpty()) {
             return Optional.empty();
         }
 
-        // Select provider with lowest average latency
-        PaymentProviderType selected = availableProviders.stream()
-                .min(Comparator.comparingLong(metrics::getAverageLatency))
-                .orElse(availableProviders.get(0));
+        PSPAdapter selected = availableAdapters.stream()
+                .min(Comparator.comparingLong(a -> metrics.getAverageLatency(a.getPSPAdapterName())))
+                .orElse(availableAdapters.get(0));
 
-        log.debug("ResponseTimeBased selected provider={} with avg latency={}ms",
-                selected, metrics.getAverageLatency(selected));
+        log.debug("ResponseTimeBased selected adapter={} with avg latency={}ms",
+                selected.getPSPAdapterName(), metrics.getAverageLatency(selected.getPSPAdapterName()));
 
         return Optional.of(selected);
     }
