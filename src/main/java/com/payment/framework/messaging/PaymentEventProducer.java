@@ -97,6 +97,9 @@ public class PaymentEventProducer {
                 .cardFingerprint(computeCardFingerprint(result))
                 .timestamp(result.getTimestamp())
                 .eventType(eventType)
+                .avsResult(result.getAvsResult())
+                .cvcResult(result.getCvcResult())
+                .threeDsResult(result.getThreeDsResult())
                 .build();
         send(request.getIdempotencyKey(), event);
     }

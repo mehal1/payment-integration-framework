@@ -39,4 +39,7 @@ public class PaymentEvent {
     String cardFingerprint;
     Instant timestamp;
     String eventType;
+    String avsResult;
+    String cvcResult;
+    String threeDsResult;
 }

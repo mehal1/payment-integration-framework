@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -49,6 +50,9 @@ public class MockAdyenAdapter implements PSPAdapter {
                     .message("Simulated decline for high amount")
                     .timestamp(Instant.now())
                     .metadata(Map.of("mock", true, "psp", "MOCK_ADYEN"))
+                    .avsResult(MockAdapterPayload.get(request.getProviderPayload(), "mockAvsResult"))
+                    .cvcResult(MockAdapterPayload.get(request.getProviderPayload(), "mockCvcResult"))
+                    .threeDsResult(MockAdapterPayload.get(request.getProviderPayload(), "mockThreeDsResult"))
                     .build();
         }
 
@@ -62,15 +66,20 @@ public class MockAdyenAdapter implements PSPAdapter {
                 .message(null)
                 .timestamp(Instant.now())
                 .metadata(Map.of("mock", true, "psp", "MOCK_ADYEN"))
+                .cardBin(MockAdapterPayload.get(request.getProviderPayload(), "mockCardBin"))
+                .cardLast4(MockAdapterPayload.get(request.getProviderPayload(), "mockCardLast4"))
+                .avsResult(MockAdapterPayload.get(request.getProviderPayload(), "mockAvsResult"))
+                .cvcResult(MockAdapterPayload.get(request.getProviderPayload(), "mockCvcResult"))
+                .threeDsResult(MockAdapterPayload.get(request.getProviderPayload(), "mockThreeDsResult"))
                 .build();
     }
 
     @Override
-    public java.util.Optional<RefundResult> refund(RefundRequest request) {
+    public Optional<RefundResult> refund(RefundRequest request) {
         log.debug("MockAdyenAdapter refunding refundIdempotencyKey={}, paymentIdempotencyKey={}, amount={}",
                 request.getIdempotencyKey(), request.getPaymentIdempotencyKey(), request.getAmount());
 
-        return java.util.Optional.of(RefundResult.builder()
+        return Optional.of(RefundResult.builder()
                 .idempotencyKey(request.getIdempotencyKey())
                 .paymentIdempotencyKey(request.getPaymentIdempotencyKey())
                 .providerRefundId("mock-adyen-refund-" + UUID.randomUUID())

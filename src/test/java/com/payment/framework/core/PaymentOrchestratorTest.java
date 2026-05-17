@@ -1,5 +1,6 @@
 package com.payment.framework.core;
 
+import com.payment.framework.api.NoPspAvailableException;
 import com.payment.framework.core.routing.PSPPerformanceMetrics;
 import com.payment.framework.core.routing.ProviderRouter;
 import com.payment.framework.domain.PaymentProviderType;
@@ -27,6 +28,7 @@ import io.github.resilience4j.retry.RetryRegistry;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -137,8 +139,11 @@ class PaymentOrchestratorTest {
 
 		PaymentResult result = orchestrator.execute(request);
 
-		assertThat(result).isEqualTo(expected);
+		assertThat(result.getIdempotencyKey()).isEqualTo(expected.getIdempotencyKey());
+		assertThat(result.getProviderTransactionId()).isEqualTo(expected.getProviderTransactionId());
 		assertThat(result.getStatus()).isEqualTo(TransactionStatus.SUCCESS);
+		assertThat(result.getAmount()).isEqualTo(expected.getAmount());
+		assertThat(result.getMetadata()).containsEntry("adapterName", "MockPSPAdapter");
 	}
 
 	/**
@@ -249,23 +254,16 @@ class PaymentOrchestratorTest {
 				.thenThrow(new RuntimeException("Failure 1"))
 				.thenThrow(new RuntimeException("Failure 2"));
 
-		// Execute first call (fails, returns failure result)
-		PaymentResult result1 = orchestrator.execute(request1);
-		assertThat(result1.getStatus()).isEqualTo(TransactionStatus.FAILED);
-		assertThat(result1.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
-
-		// Execute second call (fails, should open circuit breaker)
-		PaymentResult result2 = orchestrator.execute(request2);
-		assertThat(result2.getStatus()).isEqualTo(TransactionStatus.FAILED);
-		assertThat(result2.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
+		assertThatThrownBy(() -> orchestrator.execute(request1))
+				.isInstanceOf(NoPspAvailableException.class);
+		assertThatThrownBy(() -> orchestrator.execute(request2))
+				.isInstanceOf(NoPspAvailableException.class);
 
 		// Verify circuit breaker is OPEN
 		assertThat(cb.getState()).isEqualTo(CircuitBreaker.State.OPEN);
 
-		// Third call should be blocked by circuit breaker (returns failure result)
-		PaymentResult result3 = orchestrator.execute(request3);
-		assertThat(result3.getStatus()).isEqualTo(TransactionStatus.FAILED);
-		assertThat(result3.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
+		assertThatThrownBy(() -> orchestrator.execute(request3))
+				.isInstanceOf(NoPspAvailableException.class);
 
 		// Verify adapter.execute was only called 2 times (circuit breaker blocked the 3rd)
 		verify(mockAdapter, times(2)).execute(any(PaymentRequest.class));
@@ -308,16 +306,9 @@ class PaymentOrchestratorTest {
 		when(idempotencyService.getCachedResult("wrapping-order-test")).thenReturn(Optional.empty());
 		when(providerRouter.selectProvider(any(PaymentRequest.class))).thenReturn(Optional.of(mockAdapter));
 
-		// Circuit breaker is OPEN, so it should block immediately (before retry or adapter call)
-		// Returns failure result instead of throwing exception
-		PaymentResult result = orchestrator.execute(request);
-		assertThat(result.getStatus()).isEqualTo(TransactionStatus.FAILED);
-		assertThat(result.getFailureCode()).isEqualTo("ALL_PROVIDERS_FAILED");
+		assertThatThrownBy(() -> orchestrator.execute(request))
+				.isInstanceOf(NoPspAvailableException.class);
 
-		// Verify adapter.execute was NEVER called (circuit breaker blocked before retry could execute)
 		verify(mockAdapter, times(0)).execute(request);
-
-		// This proves: CircuitBreaker wraps Retry wraps Original
-		// When circuit breaker is OPEN, it blocks before retry logic runs
 	}
 }

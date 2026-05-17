@@ -1,5 +1,6 @@
 package com.payment.framework.risk.features;
 
+import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.messaging.PaymentEvent;
 import com.payment.framework.risk.domain.TransactionWindowFeatures;
 import lombok.extern.slf4j.Slf4j;
@@ -39,11 +40,14 @@ public class TransactionWindowAggregator {
         long timestampMs = event.getTimestamp() != null
                 ? event.getTimestamp().toEpochMilli()
                 : System.currentTimeMillis();
+        String instrumentKey = cardKeyFrom(event);
         EventEntry entry = new EventEntry(
                 event.getEventId(),
                 timestampMs,
                 event.getAmount() != null ? event.getAmount() : BigDecimal.ZERO,
-                isFailure(event)
+                isFailure(event),
+                instrumentKey,
+                event.getProviderType()
         );
         store.compute(entityId, (k, list) -> {
             if (list == null) list = new ArrayList<>();
@@ -183,6 +187,19 @@ public class TransactionWindowAggregator {
         int decreasingAmountCount = countDecreasingAmounts(inWindow);
         double avgTimeGapSeconds = computeAvgTimeGap(inWindow);
 
+        int distinctInstruments = (int) inWindow.stream()
+                .map(EventEntry::paymentInstrumentKey)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .distinct()
+                .count();
+        int distinctProviders = (int) inWindow.stream()
+                .map(EventEntry::providerType)
+                .filter(Objects::nonNull)
+                .distinct()
+                .count();
+
         return Optional.of(TransactionWindowFeatures.builder()
                 .entityId(entityId)
                 .entityType(entityType)
@@ -205,6 +222,8 @@ public class TransactionWindowAggregator {
                 .increasingAmountCount(increasingAmountCount)
                 .decreasingAmountCount(decreasingAmountCount)
                 .avgTimeGapSeconds(avgTimeGapSeconds)
+                .distinctPaymentInstrumentCount(distinctInstruments)
+                .distinctProviderTypeCount(distinctProviders)
                 .build());
     }
 
@@ -271,5 +290,12 @@ public class TransactionWindowAggregator {
         return (totalGap / 1000.0) / (entries.size() - 1);
     }
 
-    private record EventEntry(String eventId, long timestampMs, BigDecimal amount, boolean failure) {}
+    private record EventEntry(
+            String eventId,
+            long timestampMs,
+            BigDecimal amount,
+            boolean failure,
+            String paymentInstrumentKey,
+            PaymentProviderType providerType
+    ) {}
 }

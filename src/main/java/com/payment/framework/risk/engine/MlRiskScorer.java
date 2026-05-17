@@ -61,6 +61,8 @@ public class MlRiskScorer {
             request.put("increasingAmountCount", features.getIncreasingAmountCount());
             request.put("decreasingAmountCount", features.getDecreasingAmountCount());
             request.put("avgTimeGapSeconds", features.getAvgTimeGapSeconds());
+            request.put("distinctPaymentInstrumentCount", features.getDistinctPaymentInstrumentCount());
+            request.put("distinctProviderTypeCount", features.getDistinctProviderTypeCount());
 
             Map<String, Object> response = restTemplate.postForObject(
                     mlServiceUrl, request, Map.class

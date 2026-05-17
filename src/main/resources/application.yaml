@@ -54,6 +54,11 @@ payment:
         high-failure-rate: 0.5
         velocity-1min: 10
         alert-score: 0.5
+        distinct-instruments-email-ip: 3
+        cross-provider-velocity-1min: 5
+        small-amount-max: 2.0
+        small-amount-min-tx: 5
+        small-amount-min-failures: 3
     # ML integration (optional)
     ml:
       enabled: true  # Set to true to enable ML scoring

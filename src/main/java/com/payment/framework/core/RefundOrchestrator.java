@@ -1,6 +1,5 @@
 package com.payment.framework.core;
 
-import com.payment.framework.api.NoPspAvailableException;
 import com.payment.framework.domain.PaymentResult;
 import com.payment.framework.domain.RefundRequest;
 import com.payment.framework.domain.RefundResult;

@@ -23,5 +23,12 @@ public enum RiskSignalType {
     /** High failure rate for this email across payment types. */
     HIGH_EMAIL_FAILURE_RATE,
     /** High failure rate for this IP across payment types. */
-    HIGH_IP_FAILURE_RATE
+    HIGH_IP_FAILURE_RATE,
+    WEAK_CARD_VERIFICATION,
+    CVC_VERIFICATION_FAILED,
+    SCA_FAILED,
+    DISPOSABLE_EMAIL,
+    MULTIPLE_INSTRUMENTS_SAME_CUSTOMER,
+    CROSS_PROVIDER_ABUSE,
+    SMALL_AMOUNT_CARD_TESTING
 }

@@ -38,6 +38,10 @@ public class PaymentResult {
     /** Universal fingerprint: hash of card (e.g. hash(BIN+last4)). Generated at vault/routing when BIN+last4 available. */
     String cardFingerprint;
 
+    String avsResult;
+    String cvcResult;
+    String threeDsResult;
+
     public boolean isSuccess() {
         return status == TransactionStatus.SUCCESS || status == TransactionStatus.CAPTURED || status == TransactionStatus.PENDING;
     }

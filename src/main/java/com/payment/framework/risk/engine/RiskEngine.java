@@ -38,6 +38,16 @@ public class RiskEngine {
     private int velocity1MinThreshold;
     @Value("${payment.risk.engine.threshold.alert-score:0.5}")
     private double alertScoreThreshold;
+    @Value("${payment.risk.engine.threshold.distinct-instruments-email-ip:3}")
+    private int distinctInstrumentsEmailIpThreshold = 3;
+    @Value("${payment.risk.engine.threshold.cross-provider-velocity-1min:5}")
+    private int crossProviderVelocity1MinThreshold = 5;
+    @Value("${payment.risk.engine.threshold.small-amount-max:2.0}")
+    private double smallAmountMax = 2.0;
+    @Value("${payment.risk.engine.threshold.small-amount-min-tx:5}")
+    private int smallAmountMinTx = 5;
+    @Value("${payment.risk.engine.threshold.small-amount-min-failures:3}")
+    private int smallAmountMinFailures = 3;
 
     /**
      * Look at a payment and decide if it's suspicious. Evaluates across merchant, card, email, and IP
@@ -121,6 +131,8 @@ public class RiskEngine {
             allSignals.addAll(sigs);
         }
 
+        maxScore = Math.max(maxScore, scoreEventLevelSignals(event, allSignals));
+
         if (primaryEntityId == null) primaryEntityId = "unknown";
         if (primaryEntityType == null) primaryEntityType = "MERCHANT";
         if (primaryFeatures == null) primaryFeatures = merchantOpt.orElse(null);
@@ -196,6 +208,31 @@ public class RiskEngine {
             else signals.add(RiskSignalType.HIGH_VELOCITY);
             score = Math.max(score, 0.35 + Math.min(0.15, (5 - features.getAvgTimeGapSeconds()) / 10.0));
         }
+
+        boolean emailOrIpEntity = "EMAIL".equals(features.getEntityType()) || "IP".equals(features.getEntityType());
+        if (emailOrIpEntity
+                && features.getDistinctPaymentInstrumentCount() >= distinctInstrumentsEmailIpThreshold
+                && features.getTotalCount() >= distinctInstrumentsEmailIpThreshold) {
+            signals.add(RiskSignalType.MULTIPLE_INSTRUMENTS_SAME_CUSTOMER);
+            score = Math.max(score, 0.52);
+        }
+        if (emailOrIpEntity
+                && features.getDistinctProviderTypeCount() >= 2
+                && features.getCountLast1Min() >= crossProviderVelocity1MinThreshold) {
+            signals.add(RiskSignalType.CROSS_PROVIDER_ABUSE);
+            score = Math.max(score, 0.52);
+        }
+
+        BigDecimal smallMax = BigDecimal.valueOf(smallAmountMax);
+        if (features.getTotalCount() >= smallAmountMinTx
+                && features.getFailureCount() >= smallAmountMinFailures
+                && features.getMinAmount().compareTo(smallMax) <= 0) {
+            double fr = features.getFailureRate();
+            if (fr >= 0.35) {
+                signals.add(RiskSignalType.SMALL_AMOUNT_CARD_TESTING);
+                score = Math.max(score, 0.44 + Math.min(0.1, fr * 0.2));
+            }
+        }
         return score;
     }
 
@@ -224,6 +261,62 @@ public class RiskEngine {
                 && features.getSecondsSinceLastTransaction() < 5 && features.getAvgTimeGapSeconds() < 3) {
             signals.add(RiskSignalType.HIGH_VELOCITY);
         }
+
+        BigDecimal smallMax = BigDecimal.valueOf(smallAmountMax);
+        if (features.getTotalCount() >= smallAmountMinTx
+                && features.getFailureCount() >= smallAmountMinFailures
+                && features.getMinAmount().compareTo(smallMax) <= 0
+                && features.getFailureRate() >= 0.35) {
+            signals.add(RiskSignalType.SMALL_AMOUNT_CARD_TESTING);
+        }
+        boolean emailOrIpEntity = "EMAIL".equals(features.getEntityType()) || "IP".equals(features.getEntityType());
+        if (emailOrIpEntity
+                && features.getDistinctPaymentInstrumentCount() >= distinctInstrumentsEmailIpThreshold
+                && features.getTotalCount() >= distinctInstrumentsEmailIpThreshold) {
+            signals.add(RiskSignalType.MULTIPLE_INSTRUMENTS_SAME_CUSTOMER);
+        }
+        if (emailOrIpEntity
+                && features.getDistinctProviderTypeCount() >= 2
+                && features.getCountLast1Min() >= crossProviderVelocity1MinThreshold) {
+            signals.add(RiskSignalType.CROSS_PROVIDER_ABUSE);
+        }
+    }
+
+    private double scoreEventLevelSignals(PaymentEvent event, Set<RiskSignalType> signals) {
+        double score = 0.0;
+        if (EmailRiskHeuristics.isDisposableEmail(event.getEmail())) {
+            signals.add(RiskSignalType.DISPOSABLE_EMAIL);
+            score = Math.max(score, 0.36);
+        }
+        score = Math.max(score, scoreAuthenticationOutcomes(event, signals));
+        return score;
+    }
+
+    private static double scoreAuthenticationOutcomes(PaymentEvent event, Set<RiskSignalType> signals) {
+        double score = 0.0;
+        String avs = normalizeAuthToken(event.getAvsResult());
+        if (avs != null && (avs.equals("NO_MATCH") || avs.equals("N") || avs.equals("FAILED"))) {
+            signals.add(RiskSignalType.WEAK_CARD_VERIFICATION);
+            score = Math.max(score, 0.35);
+        }
+        String cvc = normalizeAuthToken(event.getCvcResult());
+        if (cvc != null && (cvc.equals("FAIL") || cvc.equals("FAILED") || cvc.equals("N"))) {
+            signals.add(RiskSignalType.CVC_VERIFICATION_FAILED);
+            score = Math.max(score, 0.42);
+        }
+        String tds = normalizeAuthToken(event.getThreeDsResult());
+        if (tds != null && (tds.equals("FAILED") || tds.equals("FAIL") || tds.equals("AUTHENTICATION_REJECTED"))) {
+            signals.add(RiskSignalType.SCA_FAILED);
+            score = Math.max(score, 0.55);
+        }
+        return score;
+    }
+
+    private static String normalizeAuthToken(String raw) {
+        if (raw == null) return null;
+        String t = raw.trim();
+        if (t.isEmpty()) return null;
+        return t.toUpperCase(Locale.ROOT).replace(' ', '_');
     }
 
     private String buildCrossTypeSummary(Set<RiskSignalType> signals, double score,

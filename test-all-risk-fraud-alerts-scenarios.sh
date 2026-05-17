@@ -2,13 +2,24 @@
 
 # Comprehensive Risk & Fraud Alert Testing Script
 # Tests all risk detection scenarios including enhanced feature engineering
-# Usage: ./test-all-risk-fraud-alerts-scenarios.sh
+# Usage:
+#   ./test-all-risk-fraud-alerts-scenarios.sh              # full suite (sections 1–5)
+#   ./test-all-risk-fraud-alerts-scenarios.sh --section-5-only
 
 # Don't exit on errors - we expect some tests to not find alerts
 set +e
 
+SECTION_5_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --section-5-only|--new-signals-only) SECTION_5_ONLY=1 ;;
+  esac
+done
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 TIMESTAMP=$(date +%s)
+SECTION_5_PASS=0
+SECTION_5_FAIL=0
 
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║     Risk & Fraud Detection - Comprehensive Test Suite          ║"
@@ -20,6 +31,7 @@ echo ""
 
 # Helper: wait for async processing then check alerts once.
 CHECK_ALERTS_WAIT=7
+SECTION_5_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 check_alerts() {
   local merchant=$1
@@ -36,6 +48,167 @@ check_alerts() {
     return 1
   fi
 }
+
+fetch_section_5_hits() {
+  local signal=$1
+  # Compare at second precision: jq string compare treats ".217Z" as < "Z" on the same second.
+  curl -s "$BASE_URL/api/v1/risk/alerts?limit=100" | jq -r --arg s "$signal" --arg since "$SECTION_5_STARTED_AT" \
+    'def ts_sec: if test("\\.") then (split(".")[0] + "Z") else . end;
+     .[] | select((.timestamp | ts_sec) >= $since) | select(.signalTypes[]? == $s)
+     | "entity=\(.entityId) type=\(.entityType) score=\(.riskScore) signals=\(.signalTypes | join(","))"'
+}
+
+check_signal() {
+  local signal=$1
+  local label=$2
+  local wait_first=${3:-1}
+  if [ "$wait_first" = "1" ]; then
+    echo "  Waiting ${CHECK_ALERTS_WAIT}s, then checking for signal: $signal"
+    sleep "$CHECK_ALERTS_WAIT"
+  else
+    echo "  Checking for signal: $signal"
+  fi
+  local hits
+  hits=$(fetch_section_5_hits "$signal")
+  if [ -n "$hits" ]; then
+    echo "  ✅ $label"
+    echo "$hits" | head -2 | sed 's/^/     /'
+    SECTION_5_PASS=$((SECTION_5_PASS + 1))
+    return 0
+  fi
+  echo "  ❌ $label — no alert with signal $signal (since $SECTION_5_STARTED_AT)"
+  echo "     Tip: rebuild and restart the app so PAYMENT_COMPLETED events include avs/cvc/3DS from providerPayload."
+  SECTION_5_FAIL=$((SECTION_5_FAIL + 1))
+  return 1
+}
+
+check_signal_any() {
+  local label=$1
+  shift
+  echo "  Waiting ${CHECK_ALERTS_WAIT}s, then checking for one of: $*"
+  sleep "$CHECK_ALERTS_WAIT"
+  local sig hits
+  for sig in "$@"; do
+    hits=$(fetch_section_5_hits "$sig")
+    if [ -n "$hits" ]; then
+      echo "  ✅ $label (matched $sig)"
+      echo "$hits" | head -2 | sed 's/^/     /'
+      SECTION_5_PASS=$((SECTION_5_PASS + 1))
+      return 0
+    fi
+  done
+  echo "  ❌ $label — no alert with any of: $* (since $SECTION_5_STARTED_AT)"
+  echo "     Tip: rebuild and restart the app so PAYMENT_COMPLETED events include avs/cvc/3DS from providerPayload."
+  SECTION_5_FAIL=$((SECTION_5_FAIL + 1))
+  return 1
+}
+
+pay() {
+  curl -s -X POST "$BASE_URL/api/v1/payments/execute" \
+    -H "Content-Type: application/json" \
+    -d "$1"
+}
+
+run_section_5_auth_and_identity_rules() {
+  SECTION_5_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  echo "╔════════════════════════════════════════════════════════════════╗"
+  echo "║  SECTION 5: Auth, Disposable Email & Cross-Identity Rules      ║"
+  echo "╚════════════════════════════════════════════════════════════════╝"
+  echo ""
+  echo "  (Requires app built from current sources: mvn package && restart Spring Boot)"
+  echo ""
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Test 5.1: DISPOSABLE_EMAIL (+ 3DS for alert threshold)"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  pay "{
+    \"idempotencyKey\": \"disp-$TIMESTAMP\",
+    \"providerType\": \"CARD\",
+    \"amount\": 10.00,
+    \"currencyCode\": \"USD\",
+    \"merchantReference\": \"disp-m-$TIMESTAMP\",
+    \"email\": \"burner-$TIMESTAMP@mailinator.com\",
+    \"providerPayload\": { \"mockThreeDsResult\": \"FAILED\" }
+  }" >/dev/null
+  check_signal "DISPOSABLE_EMAIL" "Disposable email domain" || true
+  echo ""
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Test 5.2: Auth outcomes (AVS / CVC / 3DS on CARD + providerPayload)"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  pay "{
+    \"idempotencyKey\": \"auth-$TIMESTAMP\",
+    \"providerType\": \"CARD\",
+    \"amount\": 10.00,
+    \"currencyCode\": \"USD\",
+    \"merchantReference\": \"auth-m-$TIMESTAMP\",
+    \"providerPayload\": {
+      \"mockAvsResult\": \"NO_MATCH\",
+      \"mockCvcResult\": \"FAIL\",
+      \"mockThreeDsResult\": \"FAILED\"
+    }
+  }" >/dev/null
+  check_signal_any "Auth outcome from providerPayload" SCA_FAILED CVC_VERIFICATION_FAILED WEAK_CARD_VERIFICATION || true
+  echo ""
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Test 5.3: MULTIPLE_INSTRUMENTS_SAME_CUSTOMER"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  local email="multi-$TIMESTAMP@example.com"
+  for bin in 411111 422222 433333; do
+    pay "{
+      \"idempotencyKey\": \"multi-$bin-$TIMESTAMP\",
+      \"providerType\": \"CARD\",
+      \"amount\": 10,
+      \"currencyCode\": \"USD\",
+      \"email\": \"$email\",
+      \"merchantReference\": \"merch-$bin-$TIMESTAMP\",
+      \"providerPayload\": { \"mockCardBin\": \"$bin\", \"mockCardLast4\": \"1111\" }
+    }" >/dev/null
+  done
+  check_signal "MULTIPLE_INSTRUMENTS_SAME_CUSTOMER" "Same email, 3 different cards" || true
+  echo ""
+
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "Test 5.4: CROSS_PROVIDER_ABUSE"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  local email2="hopper-$TIMESTAMP@example.com"
+  for i in 1 2 3; do
+    pay "{
+      \"idempotencyKey\": \"cp-c-$i-$TIMESTAMP\",
+      \"providerType\": \"CARD\",
+      \"amount\": 999999,
+      \"currencyCode\": \"USD\",
+      \"email\": \"$email2\",
+      \"merchantReference\": \"cp-m$i-$TIMESTAMP\"
+    }" >/dev/null
+    pay "{
+      \"idempotencyKey\": \"cp-w-$i-$TIMESTAMP\",
+      \"providerType\": \"WALLET\",
+      \"amount\": 777777,
+      \"currencyCode\": \"USD\",
+      \"email\": \"$email2\",
+      \"merchantReference\": \"cp-mw$i-$TIMESTAMP\"
+    }" >/dev/null
+  done
+  check_signal "CROSS_PROVIDER_ABUSE" "Same email, CARD + WALLET velocity" || true
+  echo ""
+
+  echo "  Section 5 checks passed: $SECTION_5_PASS, failed: $SECTION_5_FAIL"
+  echo ""
+}
+
+if [ "$SECTION_5_ONLY" = "1" ]; then
+  health=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$BASE_URL/actuator/health")
+  if [ "$health" != "200" ]; then
+    echo "❌ App not reachable at $BASE_URL (health HTTP $health)"
+    exit 1
+  fi
+  echo "✅ App health OK (section-5-only: auth & cross-identity rules)"
+  echo ""
+  run_section_5_auth_and_identity_rules
+  exit "$SECTION_5_FAIL"
+fi
 
 # ============================================================================
 # SECTION 1: BASIC RISK DETECTION TESTS
@@ -343,6 +516,8 @@ else
 fi
 echo ""
 
+run_section_5_auth_and_identity_rules
+
 # ============================================================================
 # FINAL SUMMARY
 # ============================================================================
@@ -377,5 +552,12 @@ echo "   - Amount variance & trends: ✅ Working (see Test 3.1)"
 echo "   - Time-based features: ✅ Working (hourOfDay, dayOfWeek)"
 echo "   - ML integration: ✅ Working (all 15 features sent)"
 echo "   - BNPL / Wallet / Email cross-type: ✅ Section 4 (Tests 4.1–4.3)"
+echo ""
+echo "✅ Section 5 — auth & cross-identity rules:"
+echo "   - Per-event (single payment): WEAK_CARD_VERIFICATION, CVC_VERIFICATION_FAILED,"
+echo "     SCA_FAILED, DISPOSABLE_EMAIL"
+echo "   - Email/IP rolling window: MULTIPLE_INSTRUMENTS_SAME_CUSTOMER, CROSS_PROVIDER_ABUSE"
+echo "   - Unit tests only: SMALL_AMOUNT_CARD_TESTING"
+echo "   - Quick run: ./test-all-risk-fraud-alerts-scenarios.sh --section-5-only"
 echo ""
 echo "Test suite completed at $(date)"

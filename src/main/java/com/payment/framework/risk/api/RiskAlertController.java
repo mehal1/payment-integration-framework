@@ -144,19 +144,20 @@ public class RiskAlertController {
             }
         }
         StringBuilder csv = new StringBuilder();
-        csv.append("entityId,totalCount,failureCount,failureRate,countLast1Min,avgAmount,maxAmount,minAmount,hourOfDay,dayOfWeek,secondsSinceLastTransaction,amountVariance,amountTrend,increasingAmountCount,decreasingAmountCount,avgTimeGapSeconds,label\n");
+        csv.append("entityId,totalCount,failureCount,failureRate,countLast1Min,avgAmount,maxAmount,minAmount,hourOfDay,dayOfWeek,secondsSinceLastTransaction,amountVariance,amountTrend,increasingAmountCount,decreasingAmountCount,avgTimeGapSeconds,distinctPaymentInstrumentCount,distinctProviderTypeCount,label\n");
         int lineCount = 0;
         for (String entityId : entityIds) {
             Optional<TransactionWindowFeatures> opt = aggregator.getFeatures(entityId);
             if (opt.isEmpty()) continue;
             TransactionWindowFeatures f = opt.get();
             int label = f.getFailureRate() >= LABEL_FRAUD_FAILURE_RATE_THRESHOLD ? 1 : 0;
-            csv.append(String.format("%s,%d,%d,%.4f,%d,%.2f,%.2f,%.2f,%d,%d,%d,%.4f,%.4f,%d,%d,%.4f,%d%n",
+            csv.append(String.format("%s,%d,%d,%.4f,%d,%.2f,%.2f,%.2f,%d,%d,%d,%.4f,%.4f,%d,%d,%.4f,%d,%d,%d%n",
                     escapeCsv(entityId), f.getTotalCount(), f.getFailureCount(), f.getFailureRate(),
                     f.getCountLast1Min(), f.getAvgAmount().doubleValue(), f.getMaxAmount().doubleValue(),
                     f.getMinAmount().doubleValue(), f.getHourOfDay(), f.getDayOfWeek(),
                     f.getSecondsSinceLastTransaction(), f.getAmountVariance().doubleValue(), f.getAmountTrend(),
-                    f.getIncreasingAmountCount(), f.getDecreasingAmountCount(), f.getAvgTimeGapSeconds(), label));
+                    f.getIncreasingAmountCount(), f.getDecreasingAmountCount(), f.getAvgTimeGapSeconds(),
+                    f.getDistinctPaymentInstrumentCount(), f.getDistinctProviderTypeCount(), label));
             lineCount++;
         }
         log.info("Training data generated: {} rows (entities)", lineCount);

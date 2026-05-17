@@ -1,5 +1,6 @@
 package com.payment.framework.risk.features;
 
+import com.payment.framework.domain.PaymentProviderType;
 import com.payment.framework.messaging.PaymentEvent;
 import com.payment.framework.risk.domain.TransactionWindowFeatures;
 import org.junit.jupiter.api.BeforeEach;
@@ -126,5 +127,37 @@ class TransactionWindowAggregatorTest {
         assertThat(f.getIncreasingAmountCount()).isEqualTo(2); // e1->e2, e2->e3
         assertThat(f.getDecreasingAmountCount()).isEqualTo(0);
         assertThat(f.getAvgTimeGapSeconds()).isGreaterThan(0);
+    }
+
+    @Test
+    void getEmailFeaturesCountsDistinctInstrumentsAndProviders() {
+        aggregator.record(PaymentEvent.builder()
+                .eventId("a1")
+                .merchantReference("o1")
+                .email("u@example.com")
+                .providerType(PaymentProviderType.CARD)
+                .cardBin("411111")
+                .cardLast4("1111")
+                .amount(new BigDecimal("10"))
+                .currencyCode("USD")
+                .timestamp(Instant.now())
+                .eventType("PAYMENT_COMPLETED")
+                .build());
+        aggregator.record(PaymentEvent.builder()
+                .eventId("a2")
+                .merchantReference("o2")
+                .email("u@example.com")
+                .providerType(PaymentProviderType.WALLET)
+                .paymentMethodId("wallet-token-1")
+                .amount(new BigDecimal("10"))
+                .currencyCode("USD")
+                .timestamp(Instant.now())
+                .eventType("PAYMENT_COMPLETED")
+                .build());
+
+        Optional<TransactionWindowFeatures> f = aggregator.getEmailFeatures("u@example.com");
+        assertThat(f).isPresent();
+        assertThat(f.get().getDistinctPaymentInstrumentCount()).isEqualTo(2);
+        assertThat(f.get().getDistinctProviderTypeCount()).isEqualTo(2);
     }
 }

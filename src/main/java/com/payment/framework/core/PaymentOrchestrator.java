@@ -297,6 +297,9 @@ public class PaymentOrchestrator {
                 .networkToken(result.getNetworkToken())
                 .par(result.getPar())
                 .cardFingerprint(result.getCardFingerprint())
+                .avsResult(result.getAvsResult())
+                .cvcResult(result.getCvcResult())
+                .threeDsResult(result.getThreeDsResult())
                 .build();
     }
 

@@ -21,6 +21,7 @@ import org.springframework.data.redis.serializer.SerializationException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -119,8 +120,8 @@ class IdempotencyServiceTest {
         assertThat(result.get().getIdempotencyKey()).isEqualTo("key-5");
         assertThat(result.get().getStatus()).isEqualTo(TransactionStatus.SUCCESS);
         assertThat(result.get().getAmount()).isEqualTo(new BigDecimal("50.00"));
-        // Should cache in Redis for future lookups
-        verify(redisTemplate).opsForValue();
+        verify(redisTemplate, times(2)).opsForValue();
+        verify(valueOps).set(eq("payment:idempotency:key-5"), any(PaymentResult.class), any());
     }
 
     @Test

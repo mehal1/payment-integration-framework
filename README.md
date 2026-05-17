@@ -117,44 +117,44 @@ config:
   layout: dagre
 ---
 graph LR
-    subgraph ML["**Merchant Layer**"]
-        MerchantApps[**Merchant Applications**]
+    subgraph ML["<b>Merchant Layer</b>"]
+        MerchantApps["<b>Merchant Applications</b>"]
     end
 
     subgraph PS[" "]
         direction TB
-        PSLabel["**Payment Service**"]
-        API[**REST API**]
-        Orchestrator[**Payment Orchestrator**]
-        Router[**Provider Router**]
-        Adapters[**PSP Adapters**]
+        PSLabel["<b>Payment Service</b>"]
+        API["<b>REST API</b>"]
+        Orchestrator["<b>Payment Orchestrator</b>"]
+        Router["<b>Provider Router</b>"]
+        Adapters["<b>PSP Adapters</b>"]
     end
 
-    subgraph DL["**Infrastructure**"]
-        Kafka[**Kafka**<br/>**Event Stream**]
-        Redis[**Redis**<br/>**Cache**]
-        PostgreSQL[**PostgreSQL**]
+    subgraph DL["<b>Infrastructure</b>"]
+        Kafka["<b>Kafka</b><br/><b>Event Stream</b>"]
+        Redis["<b>Redis</b><br/><b>Cache</b>"]
+        PostgreSQL["<b>PostgreSQL</b>"]
     end
 
-    subgraph RS["**Risk Service**"]
-        RiskEngine[**Risk Engine**]
+    subgraph RS["<b>Risk Service</b>"]
+        RiskEngine["<b>Risk Engine</b>"]
     end
 
-    subgraph ES["**External Services**"]
-        PSPs[**PSPs**<br/>**Stripe, Adyen, PayPal**]
+    subgraph ES["<b>External Services</b>"]
+        PSPs["<b>PSPs</b><br/><b>Stripe, Adyen, PayPal</b>"]
     end
 
-    MerchantApps -->|**1. Payment Request**| API
-    API -->|**2.**| Orchestrator
-    Orchestrator <-->|**3. Idempotency**| Redis
-    Orchestrator -->|**4. selectProvider**| Router
-    Router -->|**5.**| Adapters
-    Adapters <-->|**6. API Calls**| PSPs
-    Orchestrator -->|**7. Publish Events**| Kafka
-    Orchestrator -->|**10. Persist Transaction**| PostgreSQL
-    Kafka -->|**9. Events**| RiskEngine
-    Kafka -->|**11. Persist Events**| PostgreSQL
-    API -->|**8. Response**| MerchantApps
+    MerchantApps -->|<b>1. Payment Request</b>| API
+    API -->|<b>2.</b>| Orchestrator
+    Orchestrator <-->|<b>3. Idempotency</b>| Redis
+    Orchestrator -->|<b>4. selectProvider</b>| Router
+    Router -->|<b>5.</b>| Adapters
+    Adapters <-->|<b>6. API Calls</b>| PSPs
+    Orchestrator -->|<b>7. Publish Events</b>| Kafka
+    Orchestrator -->|<b>10. Persist Transaction</b>| PostgreSQL
+    Kafka -->|<b>9. Events</b>| RiskEngine
+    Kafka -->|<b>11. Persist Events</b>| PostgreSQL
+    API -->|<b>8. Response</b>| MerchantApps
 
     style API fill:#4A90E2,stroke:#333,font-weight:bold
     style Orchestrator fill:#4A90E2,stroke:#333,font-weight:bold
@@ -182,37 +182,37 @@ config:
   layout: dagre
 ---
 flowchart LR
- subgraph ML["**Merchant Layer**"]
-        MerchantApps["**Merchant Applications**"]
-        MerchantWebhooks["**Merchant**<br>**Webhooks**"]
+ subgraph ML["<b>Merchant Layer</b>"]
+        MerchantApps["<b>Merchant Applications</b>"]
+        MerchantWebhooks["<b>Merchant</b><br/><b>Webhooks</b>"]
   end
- subgraph RS["**Risk Service**"]
+ subgraph RS["<b>Risk Service</b>"]
     direction TB
-        Consumer["**Event Consumer**"]
-        Aggregator["**Transaction Window**<br>**Aggregator**"]
-        RiskEngine["**Risk Engine**"]
-        MLScorer["**ML Scorer**"]
-        WebhookService["**Webhook Service**"]
-        AlertAPI["**REST API**<br>**/alerts**"]
+        Consumer["<b>Event Consumer</b>"]
+        Aggregator["<b>Transaction Window</b><br/><b>Aggregator</b>"]
+        RiskEngine["<b>Risk Engine</b>"]
+        MLScorer["<b>ML Scorer</b>"]
+        WebhookService["<b>Webhook Service</b>"]
+        AlertAPI["<b>REST API</b><br/><b>/alerts</b>"]
   end
- subgraph DL["**Infrastructure**"]
-        Kafka["**Kafka**<br>**Event Stream**"]
-        PostgreSQL["**PostgreSQL**"]
+ subgraph DL["<b>Infrastructure</b>"]
+        Kafka["<b>Kafka</b><br/><b>Event Stream</b>"]
+        PostgreSQL["<b>PostgreSQL</b>"]
   end
- subgraph ES["**<small>External Services</small>**"]
-        MLService["**ML Service**"]
+ subgraph ES["<small><b>External Services</b></small>"]
+        MLService["<b>ML Service</b>"]
   end
-    Kafka -- "**1. Payment Events**" --> Consumer
-    Consumer -- "**2.**" --> Aggregator
-    Aggregator -- "**3.**" --> RiskEngine
-    RiskEngine <-- "**4. ML Scoring**" --> MLScorer
-    MLScorer <-- "**5.**" --> MLService
-    Consumer -- "**6. Alerts**" --> Kafka
-    Consumer -- "**7.**" --> WebhookService
-    Consumer -- "**10. Persist Events**" --> PostgreSQL
-    Consumer -- "**11. Persist Alerts**" --> PostgreSQL
-    WebhookService -- "**8. HTTP POST**" --> MerchantWebhooks
-    AlertAPI -- "**9. Query Alerts**" --> MerchantApps
+    Kafka -- "<b>1. Payment Events</b>" --> Consumer
+    Consumer -- "<b>2.</b>" --> Aggregator
+    Aggregator -- "<b>3.</b>" --> RiskEngine
+    RiskEngine <-- "<b>4. ML Scoring</b>" --> MLScorer
+    MLScorer <-- "<b>5.</b>" --> MLService
+    Consumer -- "<b>6. Alerts</b>" --> Kafka
+    Consumer -- "<b>7.</b>" --> WebhookService
+    Consumer -- "<b>10. Persist Events</b>" --> PostgreSQL
+    Consumer -- "<b>11. Persist Alerts</b>" --> PostgreSQL
+    WebhookService -- "<b>8. HTTP POST</b>" --> MerchantWebhooks
+    AlertAPI -- "<b>9. Query Alerts</b>" --> MerchantApps
 
     style MerchantApps fill:#E8F4F8
     style MerchantWebhooks fill:#95E1D3

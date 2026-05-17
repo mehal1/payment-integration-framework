@@ -57,4 +57,7 @@ public class TransactionWindowFeatures {
     int decreasingAmountCount;
     /** Average time gap between transactions in seconds. */
     double avgTimeGapSeconds;
+
+    int distinctPaymentInstrumentCount;
+    int distinctProviderTypeCount;
 }
